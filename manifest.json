@@ -1,0 +1,59 @@
+{
+  "manifest_version": 3,
+  "name": "Dev Brain - Developer Journal",
+  "version": "1.0.0",
+  "description": "Tracks developer browsing activity and AI tool usage to generate a daily developer journal.",
+
+  "permissions": [
+    "tabs",
+    "activeTab",
+    "storage",
+    "scripting",
+    "webNavigation",
+    "idle",
+    "windows",
+    "sidePanel"
+  ],
+
+  "host_permissions": [
+    "<all_urls>"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["tracker.js", "contentScript.js"],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "side_panel": {
+    "default_path": "popup.html"
+  },
+
+  "action": {
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_title": "Dev Brain Journal"
+  },
+
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+
+  "web_accessible_resources": [
+    {
+      "resources": ["tracker.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

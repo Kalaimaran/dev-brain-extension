@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dev Brain Journal</title>
+  <style>
+    /* ------------------------------------------------------------------ */
+    /* Reset & base                                                         */
+    /* ------------------------------------------------------------------ */
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3a;
+      --accent: #6c63ff;
+      --accent-h: #8b83ff;
+      --green: #22c55e;
+      --red: #ef4444;
+      --text: #e2e8f0;
+      --muted: #64748b;
+      --radius: 10px;
+    }
+
+    body {
+      width: 340px;
+      min-height: 200px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Header                                                               */
+    /* ------------------------------------------------------------------ */
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 16px 16px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .header-icon {
+      width: 32px;
+      height: 32px;
+      background: var(--accent);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+
+    .header-title {
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .header-sub {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Status badge                                                         */
+    /* ------------------------------------------------------------------ */
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--muted);
+      flex-shrink: 0;
+    }
+
+    .status-dot.active {
+      background: var(--green);
+      box-shadow: 0 0 6px var(--green);
+    }
+
+    .status-dot.error {
+      background: var(--red);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Stats row                                                            */
+    /* ------------------------------------------------------------------ */
+    .stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 1px;
+      background: var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .stat {
+      background: var(--bg);
+      padding: 10px 8px;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--accent);
+    }
+
+    .stat-label {
+      font-size: 10px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Main content sections                                                */
+    /* ------------------------------------------------------------------ */
+    .section {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .section:last-child {
+      border-bottom: none;
+    }
+
+    .section-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* API Key form                                                         */
+    /* ------------------------------------------------------------------ */
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    label {
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 500;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 6px;
+    }
+
+    input[type="password"],
+    input[type="text"],
+    input[type="url"] {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 7px 10px;
+      color: var(--text);
+      font-size: 12px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    input:focus {
+      border-color: var(--accent);
+    }
+
+    input.valid {
+      border-color: var(--green);
+    }
+
+    input.invalid {
+      border-color: var(--red);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Buttons                                                              */
+    /* ------------------------------------------------------------------ */
+    button {
+      cursor: pointer;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 7px 14px;
+      transition: background 0.15s, opacity 0.15s;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      white-space: nowrap;
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-h);
+    }
+
+    .btn-ghost {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .btn-ghost:hover {
+      background: var(--border);
+    }
+
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Feedback message                                                     */
+    /* ------------------------------------------------------------------ */
+    .feedback {
+      font-size: 11px;
+      margin-top: 6px;
+      min-height: 16px;
+      transition: color 0.15s;
+    }
+
+    .feedback.ok {
+      color: var(--green);
+    }
+
+    .feedback.err {
+      color: var(--red);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Toggle                                                               */
+    /* ------------------------------------------------------------------ */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .toggle-label {
+      font-size: 12px;
+    }
+
+    .toggle-desc {
+      font-size: 10px;
+      color: var(--muted);
+      margin-top: 1px;
+    }
+
+    .toggle {
+      position: relative;
+      width: 36px;
+      height: 20px;
+      flex-shrink: 0;
+    }
+
+    .toggle input {
+      display: none;
+    }
+
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      background: var(--border);
+      border-radius: 99px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .toggle input:checked~.toggle-track {
+      background: var(--accent);
+    }
+
+    .toggle-thumb {
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 14px;
+      height: 14px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.2s;
+      pointer-events: none;
+    }
+
+    .toggle input:checked~.toggle-track .toggle-thumb {
+      transform: translateX(16px);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Footer                                                               */
+    /* ------------------------------------------------------------------ */
+    .footer {
+      padding: 8px 16px;
+      text-align: center;
+      font-size: 10px;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Action buttons                                                       */
+    /* ------------------------------------------------------------------ */
+    .actions {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .btn-action {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      padding: 10px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, transform 0.1s;
+    }
+
+    .btn-action:hover {
+      background: var(--border);
+      border-color: var(--accent);
+    }
+
+    .btn-action:active {
+      transform: scale(0.98);
+    }
+
+    .btn-action.success {
+      border-color: var(--green);
+      background: rgba(34, 197, 94, 0.1);
+    }
+
+    .btn-action.error {
+      border-color: var(--red);
+      background: rgba(239, 68, 68, 0.1);
+    }
+
+    .btn-action .btn-icon {
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+
+    .btn-action .btn-label {
+      flex: 1;
+      text-align: left;
+    }
+
+    .btn-action .btn-status {
+      font-size: 10px;
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+
+    .btn-action[hidden] {
+      display: none;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-icon"><img src="icons/icon48.png" width="28" height="28" style="border-radius:4px" /></div>
+    <div>
+      <div class="header-title">Dev Brain Journal</div>
+      <div class="header-sub">Developer activity tracker</div>
+    </div>
+  </div>
+
+  <!-- Status bar -->
+  <div class="status-bar">
+    <div class="status-dot" id="statusDot"></div>
+    <span id="statusText">Checking status…</span>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats" style="grid-template-columns: 1fr 1fr;">
+    <div class="stat">
+      <div class="stat-value" id="statVisits">—</div>
+      <div class="stat-label">Visited Today</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value" id="statAI">—</div>
+      <div class="stat-label">AI Prompts Today</div>
+    </div>
+  </div>
+
+  <!-- Weekly Graph (populated by API) -->
+  <div class="section" id="weeklyGraphSection">
+    <div class="section-title">Weekly Usage</div>
+    <div id="weeklyGraphChart"
+      style="display: flex; align-items: flex-end; justify-content: space-between; height: 60px; margin-top: 10px; gap: 4px;">
+      <!-- Bars will be injected here via JS -->
+    </div>
+    <div id="weeklyGraphLabels"
+      style="display: flex; justify-content: space-between; margin-top: 4px; font-size: 9px; color: var(--muted);">
+      <!-- Labels will be injected here via JS -->
+    </div>
+  </div>
+
+  <!-- Top 5 Sites (populated by API) -->
+  <div class="section" id="topSitesSection">
+    <div class="section-title">Top 5 Sites (Time)</div>
+    <div id="topSitesContainer"
+      style="display: flex; flex-direction: column; gap: 8px; margin-top: 10px; min-height: 100px;">
+      <!-- Bars will be injected here via JS -->
+    </div>
+  </div>
+
+  <!-- Action buttons -->
+  <div class="actions">
+    <div class="section-title">Quick Actions</div>
+    <button class="btn-action" id="btnSaveTranscript">
+      <span class="btn-icon">📄</span>
+      <span class="btn-label">Save Page Transcript</span>
+      <span class="btn-status" id="statusTranscript"></span>
+    </button>
+    <button class="btn-action" id="btnSaveConversation" hidden>
+      <span class="btn-icon">🤖</span>
+      <span class="btn-label">Save AI Conversation</span>
+      <span class="btn-status" id="statusConversation"></span>
+    </button>
+  </div>
+
+  <!-- API Key configuration -->
+  <div class="section" id="sectionApiKey">
+    <div class="section-title">API Configuration</div>
+
+    <div class="input-group">
+      <label for="inputApiKey">API Key</label>
+      <div class="input-row">
+        <input type="password" id="inputApiKey" placeholder="sk-••••••••••••••••" autocomplete="off"
+          spellcheck="false" />
+        <button class="btn-primary" id="btnSaveKey">Save</button>
+      </div>
+      <div class="feedback" id="feedbackKey"></div>
+    </div>
+
+    <div class="input-group" style="margin-top: 10px;">
+      <label for="inputEndpoint">Backend endpoint</label>
+      <input type="url" id="inputEndpoint" placeholder="http://localhost:3000" />
+    </div>
+  </div>
+
+  <!-- Tracking toggles -->
+  <div class="section">
+    <div class="section-title">Tracking Options</div>
+
+    <div class="toggle-row" style="margin-bottom: 10px;">
+      <div>
+        <div class="toggle-label">Website visits</div>
+        <div class="toggle-desc">Track pages visited & time spent</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="toggleVisits" checked />
+        <div class="toggle-track">
+          <div class="toggle-thumb"></div>
+        </div>
+      </label>
+    </div>
+
+    <div class="toggle-row">
+      <div>
+        <div class="toggle-label">Search queries</div>
+        <div class="toggle-desc">Capture searches on dev sites</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="toggleSearches" checked />
+        <div class="toggle-track">
+          <div class="toggle-thumb"></div>
+        </div>
+      </label>
+    </div>
+  </div>
+
+
+  <!-- Footer -->
+  <div class="footer">
+    Dev Brain v1.0 · Events are sent to your configured backend only
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+
+</html>

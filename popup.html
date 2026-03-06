@@ -46,9 +46,16 @@
     .header {
       display: flex;
       align-items: center;
-      gap: 10px;
+      justify-content: space-between;
       padding: 16px 16px 12px;
       border-bottom: 1px solid var(--border);
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
     }
 
     .header-icon {
@@ -71,6 +78,67 @@
     .header-sub {
       font-size: 11px;
       color: var(--muted);
+    }
+
+    .profile-wrap {
+      position: relative;
+    }
+
+    .profile-btn {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .profile-menu {
+      position: absolute;
+      top: 36px;
+      right: 0;
+      width: 180px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+      padding: 8px;
+      z-index: 20;
+    }
+
+    .profile-menu[hidden] {
+      display: none;
+    }
+
+    .profile-email {
+      font-size: 11px;
+      color: var(--muted);
+      padding: 2px 4px 8px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 8px;
+      word-break: break-all;
+    }
+
+    .menu-item {
+      width: 100%;
+      text-align: left;
+      padding: 7px 8px;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text);
+      border: 1px solid transparent;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .menu-item:hover {
+      background: var(--border);
     }
 
     /* ------------------------------------------------------------------ */
@@ -398,10 +466,19 @@
 
   <!-- Header -->
   <div class="header">
-    <div class="header-icon"><img src="icons/icon48.png" width="28" height="28" style="border-radius:4px" /></div>
-    <div>
-      <div class="header-title">Dev Brain Journal</div>
-      <div class="header-sub">Developer activity tracker</div>
+    <div class="header-left">
+      <div class="header-icon"><img src="icons/icon48.png" width="28" height="28" style="border-radius:4px" /></div>
+      <div>
+        <div class="header-title">Dev Brain Journal</div>
+        <div class="header-sub">Developer activity tracker</div>
+      </div>
+    </div>
+    <div class="profile-wrap" id="profileWrap" hidden>
+      <button class="profile-btn" id="profileButton" title="Account">U</button>
+      <div class="profile-menu" id="profileMenu" hidden>
+        <div class="profile-email" id="profileEmail">—</div>
+        <button class="menu-item" id="btnLogout">Logout</button>
+      </div>
     </div>
   </div>
 
@@ -460,23 +537,27 @@
     </button>
   </div>
 
-  <!-- API Key configuration -->
-  <div class="section" id="sectionApiKey">
-    <div class="section-title">API Configuration</div>
+  <!-- Login configuration -->
+  <div class="section" id="sectionAuth">
+    <div class="section-title">Login</div>
 
     <div class="input-group">
-      <label for="inputApiKey">API Key</label>
+      <label for="inputEmail">Username or Email</label>
+      <input type="text" id="inputEmail" placeholder="johndoe or user@example.com" autocomplete="username" spellcheck="false" />
+    </div>
+
+    <div class="input-group" style="margin-top: 10px;">
+      <label for="inputPassword">Password</label>
       <div class="input-row">
-        <input type="password" id="inputApiKey" placeholder="sk-••••••••••••••••" autocomplete="off"
-          spellcheck="false" />
-        <button class="btn-primary" id="btnSaveKey">Save</button>
+        <input type="password" id="inputPassword" placeholder="Your password" autocomplete="current-password" />
+        <button class="btn-primary" id="btnLogin">Login</button>
       </div>
-      <div class="feedback" id="feedbackKey"></div>
+      <div class="feedback" id="feedbackAuth"></div>
     </div>
 
     <div class="input-group" style="margin-top: 10px;">
       <label for="inputEndpoint">Backend endpoint</label>
-      <input type="url" id="inputEndpoint" placeholder="http://localhost:3000" />
+      <input type="url" id="inputEndpoint" placeholder="http://localhost:8080" />
     </div>
   </div>
 

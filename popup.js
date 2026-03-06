@@ -2,15 +2,11 @@
  * popup.js — Controls the extension popup UI
  *
  * Responsibilities:
- *  - Load saved API key & endpoint and populate fields on open
- *  - Save API key & endpoint to chrome.storage.sync when the user clicks Save
- *  - Show today's event stats (visits, searches, AI prompts) from local storage
- *  - Persist tracking toggle states (visits / searches / AI)
- *
- * Events are sent automatically every 1 minute by the background service worker.
- *
- * chrome.storage.sync  — stores small settings that sync across devices
- * chrome.storage.local — stores the event queue (large, local only)
+ *  - Handle login (email/password) and token storage
+ *  - Show account menu (profile + logout)
+ *  - Show event stats from API
+ *  - Persist tracking toggles
+ *  - Trigger transcript/conversation capture actions
  */
 
 // ---------------------------------------------------------------------------
@@ -19,52 +15,59 @@
 const statusDot     = document.getElementById("statusDot");
 const statusText    = document.getElementById("statusText");
 
-const inputApiKey   = document.getElementById("inputApiKey");
+const inputEmail    = document.getElementById("inputEmail");
+const inputPassword = document.getElementById("inputPassword");
 const inputEndpoint = document.getElementById("inputEndpoint");
-const btnSaveKey    = document.getElementById("btnSaveKey");
-const feedbackKey   = document.getElementById("feedbackKey");
+const btnLogin      = document.getElementById("btnLogin");
+const feedbackAuth  = document.getElementById("feedbackAuth");
+const sectionAuth   = document.getElementById("sectionAuth");
+
+const profileWrap   = document.getElementById("profileWrap");
+const profileButton = document.getElementById("profileButton");
+const profileMenu   = document.getElementById("profileMenu");
+const profileEmail  = document.getElementById("profileEmail");
+const btnLogout     = document.getElementById("btnLogout");
 
 const toggleVisits   = document.getElementById("toggleVisits");
 const toggleSearches = document.getElementById("toggleSearches");
 
-const statVisits   = document.getElementById("statVisits");
-const statAI       = document.getElementById("statAI");
+const statVisits        = document.getElementById("statVisits");
+const statAI            = document.getElementById("statAI");
 const weeklyGraphChart  = document.getElementById("weeklyGraphChart");
 const weeklyGraphLabels = document.getElementById("weeklyGraphLabels");
 
-const btnSaveTranscript    = document.getElementById("btnSaveTranscript");
-const btnSaveConversation  = document.getElementById("btnSaveConversation");
-const statusTranscript     = document.getElementById("statusTranscript");
-const statusConversation   = document.getElementById("statusConversation");
+const btnSaveTranscript   = document.getElementById("btnSaveTranscript");
+const btnSaveConversation = document.getElementById("btnSaveConversation");
+const statusTranscript    = document.getElementById("statusTranscript");
+const statusConversation  = document.getElementById("statusConversation");
 
 // ---------------------------------------------------------------------------
-// Initialise popup
+// Init
 // ---------------------------------------------------------------------------
 document.addEventListener("DOMContentLoaded", async () => {
   await loadSettings();
+  await ensureValidSession();
+  await hydrateAuthUI();
   await updateStatusBadge();
   await checkAISite();
-  await refreshStats(); // Now fetches from API
+  await refreshStats();
+  registerLiveRefreshListeners();
+  registerProfileMenuListeners();
 });
 
 // ---------------------------------------------------------------------------
-// Load saved settings from chrome.storage.sync
+// Settings + auth
 // ---------------------------------------------------------------------------
 async function loadSettings() {
   const data = await chrome.storage.sync.get([
-    "apiKey",
+    "loginId",
+    "email",
     "endpoint",
     "trackVisits",
     "trackSearches"
   ]);
 
-  if (data.apiKey) {
-    const k = data.apiKey;
-    inputApiKey.value =
-      k.length > 8 ? k.slice(0, 4) + "••••••••" + k.slice(-4) : "••••••••";
-    inputApiKey.dataset.saved = "true";
-  }
-
+  inputEmail.value = data.loginId ?? data.email ?? "";
   inputEndpoint.value = data.endpoint ?? "http://localhost:8080";
 
   toggleVisits.checked   = data.trackVisits   !== false;
@@ -73,47 +76,244 @@ async function loadSettings() {
   updateActionButtonsState();
 }
 
-// ---------------------------------------------------------------------------
-// Save API key & endpoint
-// ---------------------------------------------------------------------------
-btnSaveKey.addEventListener("click", async () => {
-  const rawKey   = inputApiKey.value.trim();
-  const endpoint = inputEndpoint.value.trim();
+async function getAuthState() {
+  const sync = await chrome.storage.sync.get([
+    "accessToken",
+    "refreshToken",
+    "tokenType",
+    "expiresIn",
+    "endpoint",
+    "loginId",
+    "email",
+    "user"
+  ]);
+  const local = await chrome.storage.local.get(["accessToken"]);
 
-  if (inputApiKey.dataset.saved === "true" && rawKey.includes("••••")) {
-    if (endpoint) await chrome.storage.sync.set({ endpoint });
-    showFeedback(feedbackKey, "Settings saved.", "ok");
-    await refreshStats();
-    return;
-  }
+  return {
+    accessToken: sync.accessToken || local.accessToken || null,
+    refreshToken: sync.refreshToken || null,
+    tokenType: sync.tokenType || "Bearer",
+    expiresIn: sync.expiresIn || null,
+    endpoint: sync.endpoint || "http://localhost:8080",
+    loginId: sync.loginId || sync.email || null,
+    user: sync.user || null,
+  };
+}
 
-  if (!rawKey) {
-    showFeedback(feedbackKey, "Please enter an API key.", "err");
-    inputApiKey.classList.add("invalid");
-    return;
-  }
-
-  inputApiKey.classList.remove("invalid");
-  inputApiKey.classList.add("valid");
-  inputApiKey.dataset.saved = "true";
-
+async function saveAuthTokens(auth, endpointBase) {
   await chrome.storage.sync.set({
-    apiKey: rawKey,
-    endpoint: endpoint || "http://localhost:8080",
+    accessToken: auth.accessToken,
+    refreshToken: auth.refreshToken || null,
+    tokenType: auth.tokenType || "Bearer",
+    expiresIn: auth.expiresIn || null,
+    user: auth.user || null,
+  });
+  await chrome.storage.local.set({
+    accessToken: auth.accessToken,
+    endpoint: endpointBase,
+  });
+}
+
+async function refreshAccessToken(authState) {
+  if (!authState.refreshToken) return null;
+
+  const res = await fetch(`${authState.endpoint}/api/v1/auth/refresh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refreshToken: authState.refreshToken }),
   });
 
-  // Also copy to local so background.js can read it without sync latency
-  await chrome.storage.local.set({ apiKey: rawKey, endpoint });
+  const body = await res.json().catch(() => ({}));
+  const data = body?.data || {};
+  if (!res.ok || !body?.success || !data?.accessToken) return null;
 
-  showFeedback(feedbackKey, "API key saved successfully.", "ok");
+  await saveAuthTokens({
+    accessToken: data.accessToken,
+    refreshToken: data.refreshToken || authState.refreshToken,
+    tokenType: data.tokenType || "Bearer",
+    expiresIn: data.expiresIn || null,
+    user: data.user || authState.user || null,
+  }, authState.endpoint);
+
+  return data.accessToken;
+}
+
+async function fetchCurrentUser(endpoint, accessToken) {
+  const res = await fetch(`${endpoint}/api/v1/auth/me`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (!res.ok) return { ok: false, status: res.status, user: null };
+
+  const body = await res.json().catch(() => ({}));
+  const user = body?.data?.user || body?.data || body?.user || null;
+  return { ok: true, status: res.status, user };
+}
+
+async function clearAuthSession() {
+  await chrome.storage.sync.remove([
+    "accessToken",
+    "refreshToken",
+    "tokenType",
+    "expiresIn",
+    "user"
+  ]);
+  await chrome.storage.local.remove(["accessToken"]);
+}
+
+async function ensureValidSession() {
+  let auth = await getAuthState();
+  if (!auth.accessToken) return null;
+
+  let me = await fetchCurrentUser(auth.endpoint, auth.accessToken);
+  if (me.ok) {
+    if (me.user) await chrome.storage.sync.set({ user: me.user });
+    return await getAuthState();
+  }
+
+  const refreshedToken = await refreshAccessToken(auth);
+  if (!refreshedToken) {
+    await clearAuthSession();
+    return null;
+  }
+
+  auth = await getAuthState();
+  me = await fetchCurrentUser(auth.endpoint, auth.accessToken);
+  if (me.ok) {
+    if (me.user) await chrome.storage.sync.set({ user: me.user });
+    return await getAuthState();
+  }
+
+  await clearAuthSession();
+  return null;
+}
+
+function userInitial(user, loginId) {
+  const base = user?.fullName || loginId || "U";
+  return (base.trim()[0] || "U").toUpperCase();
+}
+
+async function hydrateAuthUI() {
+  const auth = await getAuthState();
+  const loggedIn = !!auth.accessToken;
+
+  sectionAuth.hidden = loggedIn;
+  profileWrap.hidden = !loggedIn;
+
+  if (loggedIn) {
+    profileButton.textContent = userInitial(auth.user, auth.loginId);
+    profileEmail.textContent = auth.user?.email || auth.loginId || "Signed in";
+  } else {
+    profileMenu.hidden = true;
+  }
+
+  updateActionButtonsState();
+}
+
+btnLogin.addEventListener("click", async () => {
+  const loginId = inputEmail.value.trim();
+  const password = inputPassword.value;
+  const endpoint = inputEndpoint.value.trim() || "http://localhost:8080";
+
+  if (!loginId || !password) {
+    showFeedback(feedbackAuth, "Enter username/email and password.", "err");
+    return;
+  }
+
+  btnLogin.disabled = true;
+  showFeedback(feedbackAuth, "Signing in...", "ok");
+
+  try {
+    const attempts = [
+      { identifier: loginId, password },
+      { username: loginId, password },
+      { email: loginId, password },
+    ];
+
+    let payload = null;
+    let lastError = "Login failed";
+
+    for (const requestBody of attempts) {
+      const res = await fetch(`${endpoint}/api/v1/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+      });
+
+      const body = await res.json().catch(() => ({}));
+      const data = body?.data || {};
+      if (res.ok && body?.success && data?.accessToken) {
+        payload = data;
+        break;
+      }
+      lastError = body?.message || lastError;
+    }
+
+    if (!payload?.accessToken) {
+      throw new Error(lastError);
+    }
+
+    await chrome.storage.sync.set({
+      endpoint,
+      loginId,
+      email: payload?.user?.email || loginId,
+    });
+    await saveAuthTokens({
+      accessToken: payload.accessToken,
+      refreshToken: payload.refreshToken || null,
+      tokenType: payload.tokenType || "Bearer",
+      expiresIn: payload.expiresIn || null,
+      user: payload.user || null,
+    }, endpoint);
+
+    // Backward compatibility cleanup
+    await chrome.storage.sync.remove(["apiKey"]);
+    await chrome.storage.local.remove(["apiKey"]);
+
+    inputPassword.value = "";
+    showFeedback(feedbackAuth, "Logged in successfully.", "ok");
+
+    await hydrateAuthUI();
+    await updateStatusBadge();
+    await refreshStats();
+  } catch (err) {
+    showFeedback(feedbackAuth, err.message || "Login failed.", "err");
+  } finally {
+    btnLogin.disabled = false;
+  }
+});
+
+btnLogout.addEventListener("click", async () => {
+  await clearAuthSession();
+
+  profileMenu.hidden = true;
+  statVisits.textContent = "—";
+  statAI.textContent = "—";
+  weeklyGraphChart.innerHTML = "";
+  weeklyGraphLabels.innerHTML = "";
+  const topSitesContainer = document.getElementById("topSitesContainer");
+  if (topSitesContainer) topSitesContainer.innerHTML = "";
+
+  await hydrateAuthUI();
   await updateStatusBadge();
-  await refreshStats();
+  showFeedback(feedbackAuth, "Logged out.", "ok");
 });
 
-inputApiKey.addEventListener("input", () => {
-  inputApiKey.dataset.saved = "false";
-  inputApiKey.classList.remove("valid", "invalid");
-});
+function registerProfileMenuListeners() {
+  profileButton.addEventListener("click", (evt) => {
+    evt.stopPropagation();
+    profileMenu.hidden = !profileMenu.hidden;
+  });
+
+  document.addEventListener("click", () => {
+    profileMenu.hidden = true;
+  });
+
+  profileMenu.addEventListener("click", (evt) => {
+    evt.stopPropagation();
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Tracking toggle persistence
@@ -126,14 +326,15 @@ async function saveToggles() {
   updateActionButtonsState();
 }
 
-toggleVisits.addEventListener("change",   saveToggles);
+toggleVisits.addEventListener("change", saveToggles);
 toggleSearches.addEventListener("change", saveToggles);
 
 function updateActionButtonsState() {
-  const disabled = !toggleVisits.checked;
-  btnSaveTranscript.disabled = disabled;
-  btnSaveConversation.disabled = disabled;
-  if (disabled) {
+  const disabledByTracking = !toggleVisits.checked;
+  btnSaveTranscript.disabled = disabledByTracking;
+  btnSaveConversation.disabled = disabledByTracking;
+
+  if (disabledByTracking) {
     btnSaveTranscript.title = "Enable Website Visits tracking to use this feature";
     btnSaveConversation.title = "Enable Website Visits tracking to use this feature";
   } else {
@@ -143,36 +344,35 @@ function updateActionButtonsState() {
 }
 
 // ---------------------------------------------------------------------------
-// Stats — fetch from API
+// Stats
 // ---------------------------------------------------------------------------
 async function refreshStats() {
-  const sync = await chrome.storage.sync.get(["apiKey", "endpoint"]);
-  const local = await chrome.storage.local.get(["apiKey"]);
-  const apiKey = sync.apiKey || local.apiKey;
-  const endpoint = sync.endpoint || "http://localhost:8080";
-
-  if (!apiKey) return;
+  const auth = await ensureValidSession();
+  if (!auth?.accessToken) {
+    await hydrateAuthUI();
+    await updateStatusBadge();
+    return;
+  }
 
   try {
-    const res = await fetch(`${endpoint}/api/events/stats`, {
+    const res = await fetch(`${auth.endpoint}/api/events/stats`, {
       method: "GET",
-      headers: { Authorization: `Bearer ${apiKey}` },
+      headers: { Authorization: `Bearer ${auth.accessToken}` },
     });
-    
+
     if (!res.ok) throw new Error("Stats API failed");
-    
+
     const body = await res.json();
-    const data = body.data || body; // Adjust based on ApiResponse structure
-    
+    const data = body.data || body;
+
     statVisits.textContent = data.visitsToday ?? "0";
-    statAI.textContent     = data.aiPromptsToday ?? "0";
-    
-    if (data.weeklyGraph && Array.isArray(data.weeklyGraph)) {
+    statAI.textContent = data.aiPromptsToday ?? "0";
+
+    if (Array.isArray(data.weeklyGraph)) {
       renderWeeklyGraph(data.weeklyGraph);
     }
-    
-    // Render top 5 sites if data is available
-    if (data.topSites && Array.isArray(data.topSites)) {
+
+    if (Array.isArray(data.topSites)) {
       renderTopSites(data.topSites);
     }
   } catch (err) {
@@ -185,16 +385,14 @@ async function refreshStats() {
 function renderWeeklyGraph(dataPoints) {
   weeklyGraphChart.innerHTML = "";
   weeklyGraphLabels.innerHTML = "";
-  
+
   if (dataPoints.length === 0) return;
-  
-  const maxVal = Math.max(...dataPoints.map(d => d.count), 1); // Avoid div by 0
-  
-  dataPoints.forEach(point => {
-    // Height percentage (min 4% so 0-count bars are still slightly visible)
+
+  const maxVal = Math.max(...dataPoints.map((d) => d.count), 1);
+
+  dataPoints.forEach((point) => {
     const heightPct = Math.max((point.count / maxVal) * 100, 4);
-    
-    // Create bar
+
     const bar = document.createElement("div");
     bar.style.width = "12%";
     bar.style.height = `${heightPct}%`;
@@ -203,8 +401,7 @@ function renderWeeklyGraph(dataPoints) {
     bar.style.opacity = point.count > 0 ? "1" : "0.3";
     bar.title = `${point.count} events`;
     weeklyGraphChart.appendChild(bar);
-    
-    // Create label
+
     const label = document.createElement("div");
     label.style.width = "12%";
     label.style.textAlign = "center";
@@ -217,52 +414,49 @@ function renderTopSites(sitesArr) {
   const container = document.getElementById("topSitesContainer");
   if (!container) return;
   container.innerHTML = "";
-  
+
   if (sitesArr.length === 0) {
-    container.innerHTML = `<div style="text-align:center; font-size:10px; color:var(--muted)">No data available</div>`;
+    container.innerHTML = '<div style="text-align:center; font-size:10px; color:var(--muted)">No data available</div>';
     return;
   }
-  
-  sitesArr.slice(0, 5).forEach(site => {
+
+  sitesArr.slice(0, 5).forEach((site) => {
     const row = document.createElement("div");
     row.style.display = "flex";
     row.style.flexDirection = "column";
     row.style.gap = "4px";
-    
-    // 1. Label and percentage row
+
     const info = document.createElement("div");
     info.style.display = "flex";
     info.style.justifyContent = "space-between";
     info.style.fontSize = "11px";
     info.style.color = "var(--text)";
-    
+
     const nameStr = document.createElement("span");
     nameStr.textContent = site.domain;
     nameStr.style.fontWeight = "500";
-    
+
     const pctStr = document.createElement("span");
     pctStr.textContent = `${site.percent}%`;
     pctStr.style.color = "var(--muted)";
     pctStr.style.fontSize = "10px";
-    
+
     info.appendChild(nameStr);
     info.appendChild(pctStr);
-    
-    // 2. Progress bar outer track
+
     const track = document.createElement("div");
     track.style.width = "100%";
     track.style.height = "6px";
     track.style.backgroundColor = "var(--border)";
     track.style.borderRadius = "3px";
     track.style.overflow = "hidden";
-    
-    // 3. Progress bar inner fill
+
     const fill = document.createElement("div");
     fill.style.width = `${site.percent}%`;
     fill.style.height = "100%";
     fill.style.backgroundColor = "var(--accent)";
     fill.style.borderRadius = "3px";
-    
+
     track.appendChild(fill);
     row.appendChild(info);
     row.appendChild(track);
@@ -271,20 +465,20 @@ function renderTopSites(sitesArr) {
 }
 
 // ---------------------------------------------------------------------------
-// Status badge
+// Status
 // ---------------------------------------------------------------------------
 async function updateStatusBadge() {
-  const { apiKey } = await chrome.storage.sync.get("apiKey");
+  const auth = await getAuthState();
 
-  if (!apiKey) {
-    setStatus("error", "No API key — tracking paused");
+  if (!auth.accessToken) {
+    setStatus("error", "Not signed in — tracking queued");
   } else {
-    setStatus("active", "Auto-sending every 1 min");
+    setStatus("active", "Signed in and tracking active");
   }
 }
 
 function setStatus(type, text) {
-  statusDot.className   = `status-dot ${type}`;
+  statusDot.className = `status-dot ${type}`;
   statusText.textContent = text;
 }
 
@@ -292,17 +486,15 @@ function setStatus(type, text) {
 // Utility
 // ---------------------------------------------------------------------------
 function showFeedback(el, message, type) {
+  if (!el) return;
   el.textContent = message;
-  el.className   = `feedback ${type}`;
+  el.className = `feedback ${type}`;
   setTimeout(() => {
     el.textContent = "";
-    el.className   = "feedback";
+    el.className = "feedback";
   }, 3000);
 }
 
-// ---------------------------------------------------------------------------
-// Action button feedback helper
-// ---------------------------------------------------------------------------
 function showBtnStatus(btn, statusEl, message, type) {
   statusEl.textContent = message;
   btn.classList.remove("success", "error");
@@ -314,7 +506,7 @@ function showBtnStatus(btn, statusEl, message, type) {
 }
 
 // ---------------------------------------------------------------------------
-// Known AI site hostnames (used for URL-based detection in popup)
+// AI site checks + panel live refresh
 // ---------------------------------------------------------------------------
 const AI_HOSTNAMES = [
   "chatgpt.com",
@@ -323,50 +515,76 @@ const AI_HOSTNAMES = [
   "gemini.google.com",
 ];
 
-// ---------------------------------------------------------------------------
-// Ensure content scripts are injected into the given tab.
-// After extension reload, existing tabs lose their content scripts.
-// We programmatically inject them so our messages have a receiver.
-// ---------------------------------------------------------------------------
 async function ensureContentScripts(tabId) {
   try {
-    // Try a quick probe first — if the content script is already loaded it will respond
     await chrome.tabs.sendMessage(tabId, { type: "ping" });
   } catch {
-    // Content script is NOT loaded — inject it now
     console.log("[DevBrain popup] Injecting content scripts into tab", tabId);
     await chrome.scripting.executeScript({
       target: { tabId },
       files: ["tracker.js", "contentScript.js"],
     });
-    // Give scripts a moment to initialise
     await new Promise((r) => setTimeout(r, 200));
   }
 }
 
-// ---------------------------------------------------------------------------
-// Check if current tab is an AI site → show/hide "Save Conversation" button
-// Uses the tab URL directly — no content script needed.
-// ---------------------------------------------------------------------------
 async function checkAISite() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.url) return;
+    if (!tab?.url) {
+      btnSaveConversation.hidden = true;
+      return;
+    }
     const hostname = new URL(tab.url).hostname;
     const isAI = AI_HOSTNAMES.some((h) => hostname.includes(h));
-    if (isAI) {
-      btnSaveConversation.hidden = false;
-    }
+    btnSaveConversation.hidden = !isAI;
   } catch {
-    // Ignore — button stays hidden
+    btnSaveConversation.hidden = true;
   }
 }
 
+let panelRefreshScheduled = false;
+
+function schedulePanelRefresh() {
+  if (panelRefreshScheduled) return;
+  panelRefreshScheduled = true;
+  setTimeout(async () => {
+    panelRefreshScheduled = false;
+    await checkAISite();
+    await refreshStats();
+  }, 200);
+}
+
+function registerLiveRefreshListeners() {
+  chrome.tabs.onActivated.addListener(() => {
+    schedulePanelRefresh();
+  });
+
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (!tab?.active) return;
+    if (changeInfo.status === "complete" || changeInfo.url) {
+      schedulePanelRefresh();
+    }
+  });
+
+  chrome.windows.onFocusChanged.addListener(() => {
+    schedulePanelRefresh();
+  });
+}
+
 // ---------------------------------------------------------------------------
-// Save Transcript — grabs page text from current tab
+// Action buttons
 // ---------------------------------------------------------------------------
 btnSaveTranscript.addEventListener("click", async () => {
   try {
+    const auth = await ensureValidSession();
+    if (!auth?.accessToken) {
+      await hydrateAuthUI();
+      await updateStatusBadge();
+      showBtnStatus(btnSaveTranscript, statusTranscript, "Please login", "error");
+      return;
+    }
+
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) {
       showBtnStatus(btnSaveTranscript, statusTranscript, "No active tab", "error");
@@ -374,18 +592,14 @@ btnSaveTranscript.addEventListener("click", async () => {
     }
 
     statusTranscript.textContent = "Capturing…";
-
-    // Ensure content scripts are injected before sending the message
     await ensureContentScripts(tab.id);
 
     const response = await chrome.tabs.sendMessage(tab.id, { type: "getPageText" });
-
     if (!response?.pageText) {
       showBtnStatus(btnSaveTranscript, statusTranscript, "No text found", "error");
       return;
     }
 
-    // Send to background for event queueing
     await chrome.runtime.sendMessage({
       eventType: "page_content",
       domain: new URL(tab.url).hostname,
@@ -401,11 +615,16 @@ btnSaveTranscript.addEventListener("click", async () => {
   }
 });
 
-// ---------------------------------------------------------------------------
-// Save Conversation — grabs AI chat from current tab
-// ---------------------------------------------------------------------------
 btnSaveConversation.addEventListener("click", async () => {
   try {
+    const auth = await ensureValidSession();
+    if (!auth?.accessToken) {
+      await hydrateAuthUI();
+      await updateStatusBadge();
+      showBtnStatus(btnSaveConversation, statusConversation, "Please login", "error");
+      return;
+    }
+
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) {
       showBtnStatus(btnSaveConversation, statusConversation, "No active tab", "error");
@@ -413,8 +632,6 @@ btnSaveConversation.addEventListener("click", async () => {
     }
 
     statusConversation.textContent = "Capturing…";
-
-    // Ensure content scripts are injected before sending the message
     await ensureContentScripts(tab.id);
 
     const response = await chrome.tabs.sendMessage(tab.id, { type: "getAIConversation" });
@@ -424,17 +641,24 @@ btnSaveConversation.addEventListener("click", async () => {
       return;
     }
 
-    // Stringify the full conversation and send as a single event
+    const resolvedUrl = response.url || tab.url || "";
+    const resolvedDomain = resolvedUrl ? new URL(resolvedUrl).hostname : null;
+
     await chrome.runtime.sendMessage({
       eventType: "ai_prompt",
       aiService: response.aiService,
-      domain: new URL(response.url).hostname,
-      url: response.url,
-      pageTitle: response.pageTitle,
+      domain: resolvedDomain,
+      url: resolvedUrl,
+      pageTitle: response.pageTitle || tab.title || "AI Conversation",
       promptText: JSON.stringify(response.conversation),
     });
 
-    showBtnStatus(btnSaveConversation, statusConversation, `✓ Saved (${response.conversation.length} pairs)`, "success");
+    showBtnStatus(
+      btnSaveConversation,
+      statusConversation,
+      `✓ Saved (${response.conversation.length} pairs)`,
+      "success"
+    );
   } catch (err) {
     showBtnStatus(btnSaveConversation, statusConversation, "Failed", "error");
     console.error("[DevBrain] Save conversation error:", err);

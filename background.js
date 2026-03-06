@@ -16,18 +16,16 @@
 // Constants
 // ---------------------------------------------------------------------------
 
-const API_ENDPOINT = "http://localhost:8080/api/events"; // DataNexus Spring Boot backend
+const DEFAULT_ENDPOINT = "http://localhost:8080";
+const EVENTS_PATH = "/api/events";
 const IDLE_THRESHOLD_SEC = 60;    // consider user idle after 60 s of inactivity
-
-// Hardcoded JWT for local testing — replaces popup-entered key
-const HARDCODED_API_KEY = "eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiIxIiwidXNlcm5hbWUiOiJqb2huZG9lIiwiaWF0IjoxNzcyNjk4NTA2LCJleHAiOjE3NzI3ODQ5MDZ9.Zn45PYyoeRsLIRFTP8GQa0uvngIjLWtWPfym7pfWraDaw06Ngl0LXhZE2-mSgVvw";
 
 // ---------------------------------------------------------------------------
 // In-memory state (survives only while the service worker is alive)
 // ---------------------------------------------------------------------------
 
 /**
- * { [tabId]: { url, domain, title, startTime, windowId } }
+ * { [tabId]: { url, domain, title, startTime, accumulatedMs, windowId } }
  * Only contains tabs that are CURRENTLY being timed (active + focused window).
  */
 const activeTabs = {};
@@ -73,6 +71,40 @@ function shouldIgnoreUrl(url) {
 /** ISO timestamp string */
 const now = () => new Date().toISOString();
 
+async function refreshAccessToken(endpointBase, refreshToken) {
+  if (!refreshToken) return null;
+
+  try {
+    const res = await fetch(`${endpointBase}/api/v1/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken }),
+    });
+
+    const body = await res.json().catch(() => ({}));
+    const data = body?.data || {};
+    if (!res.ok || !body?.success || !data?.accessToken) {
+      return null;
+    }
+
+    await chrome.storage.sync.set({
+      accessToken: data.accessToken,
+      refreshToken: data.refreshToken || refreshToken,
+      tokenType: data.tokenType || "Bearer",
+      expiresIn: data.expiresIn || null,
+      user: data.user || null,
+    });
+    await chrome.storage.local.set({
+      accessToken: data.accessToken,
+      endpoint: endpointBase,
+    });
+
+    return data.accessToken;
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Event queue & API flush
 // ---------------------------------------------------------------------------
@@ -112,7 +144,7 @@ async function enqueueEvent(event) {
 }
 
 /**
- * Reads the API key from storage, then POSTs all queued events to the backend.
+ * Reads the access token from storage, then POSTs all queued events to the backend.
  * On success the queue is cleared; on failure events remain for retry.
  */
 async function flushEvents() {
@@ -121,13 +153,15 @@ async function flushEvents() {
   // cache — merging both would create duplicates, so we only use storage here.)
   const { pendingEvents = [] } = await chrome.storage.local.get("pendingEvents");
 
-  // Use hardcoded key for local testing; fallback to storage key if cleared
-  const local = await chrome.storage.local.get("apiKey");
-  const sync  = await chrome.storage.sync.get("apiKey");
-  const apiKey = HARDCODED_API_KEY || local.apiKey || sync.apiKey || null;
+  const local = await chrome.storage.local.get(["accessToken", "endpoint"]);
+  const sync  = await chrome.storage.sync.get(["accessToken", "endpoint", "refreshToken"]);
+  const accessToken = local.accessToken || sync.accessToken || null;
+  const refreshToken = sync.refreshToken || null;
+  const endpointBase = (sync.endpoint || local.endpoint || DEFAULT_ENDPOINT).replace(/\/+$/, "");
+  const eventsEndpoint = `${endpointBase}${EVENTS_PATH}`;
 
   console.log(
-    `[DevBrain] flushEvents() — queue=${pendingEvents.length} event(s), apiKey=${apiKey ? "✓ present" : "✗ missing"}`
+    `[DevBrain] flushEvents() — queue=${pendingEvents.length} event(s), accessToken=${accessToken ? "✓ present" : "✗ missing"}`
   );
 
   if (pendingEvents.length === 0) {
@@ -135,25 +169,39 @@ async function flushEvents() {
     return;
   }
 
-  if (!apiKey) {
-    console.warn("[DevBrain] No API key set — events are queued locally until you save a key in the popup.");
+  if (!accessToken) {
+    console.warn("[DevBrain] No access token — events are queued locally until user logs in from popup.");
     return;
   }
 
   const payload = { events: pendingEvents };
 
-  console.log(`[DevBrain] Sending ${pendingEvents.length} event(s) to ${API_ENDPOINT}`);
+  console.log(`[DevBrain] Sending ${pendingEvents.length} event(s) to ${eventsEndpoint}`);
   console.log("[DevBrain] Payload:", JSON.stringify(payload, null, 2));
 
   try {
-    const res = await fetch(API_ENDPOINT, {
+    let res = await fetch(eventsEndpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify(payload),
     });
+
+    if (res.status === 401 && refreshToken) {
+      const newAccessToken = await refreshAccessToken(endpointBase, refreshToken);
+      if (newAccessToken) {
+        res = await fetch(eventsEndpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${newAccessToken}`,
+          },
+          body: JSON.stringify(payload),
+        });
+      }
+    }
 
     const responseText = await res.text();
 
@@ -186,9 +234,25 @@ function startTrackingTab(tabId, url, title, windowId) {
     domain: extractDomain(url),
     title: title ?? "",
     startTime: Date.now(),
+    accumulatedMs: 0,
     windowId: windowId ?? null,
   };
   console.log(`[DevBrain] ▶ Focus started: tab=${tabId} url=${url}`);
+}
+
+/** Pause timer without emitting an event (used for idle/unfocused states). */
+function pauseTrackingTab(tabId) {
+  const info = activeTabs[tabId];
+  if (!info || info.startTime == null) return;
+  info.accumulatedMs += Date.now() - info.startTime;
+  info.startTime = null;
+}
+
+/** Resume timer after pause (keeps previously accumulated active time). */
+function resumeTrackingTab(tabId) {
+  const info = activeTabs[tabId];
+  if (!info || info.startTime != null) return;
+  info.startTime = Date.now();
 }
 
 /**
@@ -202,7 +266,8 @@ async function stopTrackingTab(tabId) {
     return;
   }
 
-  const timeSpentMs = Date.now() - info.startTime;
+  const runningMs = info.startTime == null ? 0 : (Date.now() - info.startTime);
+  const timeSpentMs = (info.accumulatedMs ?? 0) + runningMs;
   delete activeTabs[tabId];
 
   // Ignore visits shorter than 2 seconds (likely accidental/redirects)
@@ -259,23 +324,32 @@ chrome.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
  * the timer for the new URL (only if it's still the active, focused tab).
  */
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  // Keep activeTabs URL current for SPA navigation (pushState fires a URL change
-  // event without triggering status:"complete", so we must update here separately).
-  if (changeInfo.url && activeTabs[tabId]) {
-    activeTabs[tabId].url    = changeInfo.url;
-    activeTabs[tabId].domain = extractDomain(changeInfo.url);
-    activeTabs[tabId].title  = tab.title ?? activeTabs[tabId].title;
+  // URL change means user is leaving the previous page in this tab.
+  // Flush FIRST so the visit is attributed to the page being left, not the new URL.
+  if (changeInfo.url) {
+    if (activeTabs[tabId]) {
+      await stopTrackingTab(tabId);
+    }
+
+    // Start timing the new URL immediately for SPA navigation where "complete"
+    // may never fire after pushState/replaceState.
+    if (tab.active && tab.windowId === focusedWindowId && !shouldIgnoreUrl(changeInfo.url)) {
+      startTrackingTab(tabId, changeInfo.url, tab.title, tab.windowId);
+    }
+    return;
   }
 
   if (changeInfo.status !== "complete") return;
-  if (shouldIgnoreUrl(tab.url)) return;
 
-  // Flush the old URL's focus time for this tab
+  // If already tracking this tab, keep metadata fresh without resetting time.
   if (activeTabs[tabId]) {
-    await stopTrackingTab(tabId);
+    activeTabs[tabId].title = tab.title ?? activeTabs[tabId].title;
+    return;
   }
 
-  // Restart only if this tab is the active tab in the focused window
+  if (shouldIgnoreUrl(tab.url)) return;
+
+  // Start only if this tab is the active tab in the focused window.
   if (tab.active && tab.windowId === focusedWindowId) {
     startTrackingTab(tabId, tab.url, tab.title, tab.windowId);
   }
@@ -294,9 +368,9 @@ chrome.tabs.onRemoved.addListener(async (tabId, removeInfo) => {
  * Stop all timers when focus leaves; resume for the active tab when focus returns.
  */
 chrome.windows.onFocusChanged.addListener(async (windowId) => {
-  // Stop all running timers (focus left the previous window)
+  // Pause all running timers (do not emit while user is just unfocused)
   for (const id of Object.keys(activeTabs)) {
-    await stopTrackingTab(Number(id));
+    pauseTrackingTab(Number(id));
   }
 
   focusedWindowId = windowId;
@@ -306,12 +380,16 @@ chrome.windows.onFocusChanged.addListener(async (windowId) => {
     return;
   }
 
-  // Start timing the active tab in the newly focused window
+  // Resume timing the active tab in the newly focused window
   try {
     const [activeTab] = await chrome.tabs.query({ active: true, windowId });
     if (activeTab && !shouldIgnoreUrl(activeTab.url)) {
       activeTabPerWindow[windowId] = activeTab.id;
-      startTrackingTab(activeTab.id, activeTab.url, activeTab.title, windowId);
+      if (activeTabs[activeTab.id]) {
+        resumeTrackingTab(activeTab.id);
+      } else {
+        startTrackingTab(activeTab.id, activeTab.url, activeTab.title, windowId);
+      }
     }
   } catch {}
 });
@@ -324,9 +402,9 @@ chrome.idle.setDetectionInterval(IDLE_THRESHOLD_SEC);
 
 chrome.idle.onStateChanged.addListener(async (state) => {
   if (state === "idle" || state === "locked") {
-    // Stop all running timers
+    // Pause all running timers (no emit on idle)
     for (const tabId of Object.keys(activeTabs)) {
-      await stopTrackingTab(Number(tabId));
+      pauseTrackingTab(Number(tabId));
     }
     console.log("[DevBrain] User idle/locked — all timers paused.");
   } else if (state === "active") {
@@ -335,7 +413,11 @@ chrome.idle.onStateChanged.addListener(async (state) => {
       try {
         const [activeTab] = await chrome.tabs.query({ active: true, windowId: focusedWindowId });
         if (activeTab && !shouldIgnoreUrl(activeTab.url)) {
-          startTrackingTab(activeTab.id, activeTab.url, activeTab.title, focusedWindowId);
+          if (activeTabs[activeTab.id]) {
+            resumeTrackingTab(activeTab.id);
+          } else {
+            startTrackingTab(activeTab.id, activeTab.url, activeTab.title, focusedWindowId);
+          }
         }
       } catch {}
     }

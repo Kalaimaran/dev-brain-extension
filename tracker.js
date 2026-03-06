@@ -117,8 +117,23 @@ const AI_SITE_CONFIGS = [
   // -------------------------------------------------------------------------
   {
     hostMatch: "claude.ai",
-    promptSel: '[data-testid="human-turn"], .human-turn, [class*="human"]',
-    responseSel: '[data-testid="ai-turn"], .ai-turn, [class*="assistant"]',
+    // Claude DOM changes frequently; keep selectors broad but targeted.
+    promptSel: [
+      '[data-testid="human-turn"]',
+      '[data-testid*="human"]',
+      '[data-testid*="user"]',
+      '[data-testid*="message-user"]',
+      'div[data-author="human"]',
+      'div[data-author="user"]'
+    ].join(", "),
+    responseSel: [
+      '[data-testid="ai-turn"]',
+      '[data-testid*="assistant"]',
+      '[data-testid*="ai"]',
+      '[data-testid*="message-assistant"]',
+      'div[data-author="assistant"]',
+      'div[data-author="ai"]'
+    ].join(", "),
     getPromptText: (el) => el.innerText?.trim() ?? "",
     getResponseText: (el) => el.innerText?.trim() ?? "",
   },

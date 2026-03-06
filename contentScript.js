@@ -87,41 +87,54 @@ if (!location.protocol.startsWith("http")) {
 
     // --- Grab entire AI conversation ---
     if (message.type === "getAIConversation") {
-      const aiConfig = getAISiteConfig();
-      if (!aiConfig) {
-        sendResponse({ conversation: null });
-        return;
-      }
+      try {
+        const aiConfig = getAISiteConfig();
+        if (!aiConfig) {
+          sendResponse({ conversation: null });
+          return;
+        }
 
-      const prompts = [];
-      const responses = [];
+        const prompts = [];
+        const responses = [];
+        const seenPrompts = new Set();
+        const seenResponses = new Set();
 
-      for (const el of document.querySelectorAll(aiConfig.promptSel)) {
-        const text = aiConfig.getPromptText(el);
-        if (text) prompts.push(text);
-      }
+        for (const el of document.querySelectorAll(aiConfig.promptSel)) {
+          const text = aiConfig.getPromptText(el);
+          const normalized = text?.trim();
+          if (!normalized || seenPrompts.has(normalized)) continue;
+          seenPrompts.add(normalized);
+          prompts.push(normalized);
+        }
 
-      for (const el of document.querySelectorAll(aiConfig.responseSel)) {
-        const text = aiConfig.getResponseText(el);
-        if (text) responses.push(text);
-      }
+        for (const el of document.querySelectorAll(aiConfig.responseSel)) {
+          const text = aiConfig.getResponseText(el);
+          const normalized = text?.trim();
+          if (!normalized || seenResponses.has(normalized)) continue;
+          seenResponses.add(normalized);
+          responses.push(normalized);
+        }
 
-      // Pair prompts and responses into {request, response} objects
-      const conversation = [];
-      const maxLen = Math.max(prompts.length, responses.length);
-      for (let i = 0; i < maxLen; i++) {
-        conversation.push({
-          request:  i < prompts.length   ? prompts[i]   : null,
-          response: i < responses.length ? responses[i] : null,
+        // Pair prompts and responses into {request, response} objects
+        const conversation = [];
+        const maxLen = Math.max(prompts.length, responses.length);
+        for (let i = 0; i < maxLen; i++) {
+          conversation.push({
+            request:  i < prompts.length   ? prompts[i]   : null,
+            response: i < responses.length ? responses[i] : null,
+          });
+        }
+
+        sendResponse({
+          conversation,
+          aiService: aiConfig.hostMatch,
+          url: location.href,
+          pageTitle: document.title,
         });
+      } catch (err) {
+        console.error("[DevBrain] getAIConversation failed:", err);
+        sendResponse({ conversation: null, error: err?.message ?? "unknown_error" });
       }
-
-      sendResponse({
-        conversation,
-        aiService: aiConfig.hostMatch,
-        url: location.href,
-        pageTitle: document.title,
-      });
       return;
     }
   });

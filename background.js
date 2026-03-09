@@ -16,7 +16,9 @@
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEFAULT_ENDPOINT = "http://localhost:8080";
+const PROD_ENDPOINT = "https://data-nexus-541643753386.asia-south1.run.app";
+const DEV_ENDPOINT = "http://localhost:8080";
+const DEFAULT_ENDPOINT = PROD_ENDPOINT;
 const EVENTS_PATH = "/api/events";
 const IDLE_THRESHOLD_SEC = 60;    // consider user idle after 60 s of inactivity
 
@@ -179,6 +181,10 @@ async function refreshAccessToken(endpointBase, refreshToken) {
   }
 }
 
+function resolveEndpoint(developerMode) {
+  return developerMode ? DEV_ENDPOINT : PROD_ENDPOINT;
+}
+
 // ---------------------------------------------------------------------------
 // Event queue & API flush
 // ---------------------------------------------------------------------------
@@ -228,10 +234,15 @@ async function flushEvents() {
   const { pendingEvents = [] } = await chrome.storage.local.get("pendingEvents");
 
   const local = await chrome.storage.local.get(["accessToken", "endpoint"]);
-  const sync  = await chrome.storage.sync.get(["accessToken", "endpoint", "refreshToken"]);
+  const sync  = await chrome.storage.sync.get(["accessToken", "endpoint", "refreshToken", "developerMode"]);
   const accessToken = local.accessToken || sync.accessToken || null;
   const refreshToken = sync.refreshToken || null;
-  const endpointBase = (sync.endpoint || local.endpoint || DEFAULT_ENDPOINT).replace(/\/+$/, "");
+  const endpointBase = (
+    resolveEndpoint(sync.developerMode === true) ||
+    sync.endpoint ||
+    local.endpoint ||
+    DEFAULT_ENDPOINT
+  ).replace(/\/+$/, "");
   const eventsEndpoint = `${endpointBase}${EVENTS_PATH}`;
 
   console.log(

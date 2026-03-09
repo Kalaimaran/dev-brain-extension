@@ -141,6 +141,22 @@
       background: var(--border);
     }
 
+    .menu-toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 7px 8px;
+      border-radius: 8px;
+      margin-bottom: 6px;
+    }
+
+    .menu-toggle-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
     /* ------------------------------------------------------------------ */
     /* Status badge                                                         */
     /* ------------------------------------------------------------------ */
@@ -477,6 +493,15 @@
       <button class="profile-btn" id="profileButton" title="Account">U</button>
       <div class="profile-menu" id="profileMenu" hidden>
         <div class="profile-email" id="profileEmail">—</div>
+        <div class="menu-toggle-row">
+          <span class="menu-toggle-label">Developer Mode</span>
+          <label class="toggle">
+            <input type="checkbox" id="toggleDeveloperMode" />
+            <div class="toggle-track">
+              <div class="toggle-thumb"></div>
+            </div>
+          </label>
+        </div>
         <button class="menu-item" id="btnLogout">Logout</button>
       </div>
     </div>
@@ -557,7 +582,7 @@
 
     <div class="input-group" style="margin-top: 10px;">
       <label for="inputEndpoint">Backend endpoint</label>
-      <input type="url" id="inputEndpoint" placeholder="http://localhost:8080" />
+      <input type="url" id="inputEndpoint" placeholder="https://data-nexus-541643753386.asia-south1.run.app" />
     </div>
   </div>
 

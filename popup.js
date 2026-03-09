@@ -12,6 +12,9 @@
 // ---------------------------------------------------------------------------
 // DOM references
 // ---------------------------------------------------------------------------
+const PROD_ENDPOINT = "https://data-nexus-541643753386.asia-south1.run.app";
+const DEV_ENDPOINT = "http://localhost:8080";
+
 const statusDot     = document.getElementById("statusDot");
 const statusText    = document.getElementById("statusText");
 
@@ -26,6 +29,7 @@ const profileWrap   = document.getElementById("profileWrap");
 const profileButton = document.getElementById("profileButton");
 const profileMenu   = document.getElementById("profileMenu");
 const profileEmail  = document.getElementById("profileEmail");
+const toggleDeveloperMode = document.getElementById("toggleDeveloperMode");
 const btnLogout     = document.getElementById("btnLogout");
 
 const toggleVisits   = document.getElementById("toggleVisits");
@@ -63,17 +67,27 @@ async function loadSettings() {
     "loginId",
     "email",
     "endpoint",
+    "developerMode",
     "trackVisits",
     "trackSearches"
   ]);
 
   inputEmail.value = data.loginId ?? data.email ?? "";
-  inputEndpoint.value = data.endpoint ?? "http://localhost:8080";
+  const developerMode = data.developerMode === true;
+  inputEndpoint.value = resolveEndpoint(developerMode);
+  inputEndpoint.readOnly = true;
+  toggleDeveloperMode.checked = developerMode;
 
   toggleVisits.checked   = data.trackVisits   !== false;
   toggleSearches.checked = data.trackSearches !== false;
 
+  await chrome.storage.sync.set({ endpoint: inputEndpoint.value });
+  await chrome.storage.local.set({ endpoint: inputEndpoint.value });
   updateActionButtonsState();
+}
+
+function resolveEndpoint(developerMode) {
+  return developerMode ? DEV_ENDPOINT : PROD_ENDPOINT;
 }
 
 async function getAuthState() {
@@ -83,18 +97,20 @@ async function getAuthState() {
     "tokenType",
     "expiresIn",
     "endpoint",
+    "developerMode",
     "loginId",
     "email",
     "user"
   ]);
   const local = await chrome.storage.local.get(["accessToken"]);
+  const endpoint = resolveEndpoint(sync.developerMode === true);
 
   return {
     accessToken: sync.accessToken || local.accessToken || null,
     refreshToken: sync.refreshToken || null,
     tokenType: sync.tokenType || "Bearer",
     expiresIn: sync.expiresIn || null,
-    endpoint: sync.endpoint || "http://localhost:8080",
+    endpoint,
     loginId: sync.loginId || sync.email || null,
     user: sync.user || null,
   };
@@ -214,7 +230,7 @@ async function hydrateAuthUI() {
 btnLogin.addEventListener("click", async () => {
   const loginId = inputEmail.value.trim();
   const password = inputPassword.value;
-  const endpoint = inputEndpoint.value.trim() || "http://localhost:8080";
+  const endpoint = resolveEndpoint(toggleDeveloperMode.checked);
 
   if (!loginId || !password) {
     showFeedback(feedbackAuth, "Enter username/email and password.", "err");
@@ -312,6 +328,18 @@ function registerProfileMenuListeners() {
 
   profileMenu.addEventListener("click", (evt) => {
     evt.stopPropagation();
+  });
+
+  toggleDeveloperMode.addEventListener("change", async () => {
+    const endpoint = resolveEndpoint(toggleDeveloperMode.checked);
+    inputEndpoint.value = endpoint;
+    await chrome.storage.sync.set({
+      developerMode: toggleDeveloperMode.checked,
+      endpoint,
+    });
+    await chrome.storage.local.set({ endpoint });
+    await updateStatusBadge();
+    await refreshStats();
   });
 }
 

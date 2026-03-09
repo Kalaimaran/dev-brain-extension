@@ -42,6 +42,10 @@ let focusedWindowId = -1;
 /** Pending events waiting to be flushed */
 let eventQueue = [];
 
+// Prevent overlapping startup recovery runs.
+let recoveryInProgress = false;
+let trackingStateHydrated = false;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -70,6 +74,76 @@ function shouldIgnoreUrl(url) {
 
 /** ISO timestamp string */
 const now = () => new Date().toISOString();
+
+/** Persist current in-memory tracking state so it survives SW suspension. */
+async function persistTrackingState() {
+  try {
+    await chrome.storage.local.set({
+      trackedActiveTabs: activeTabs,
+      trackedActiveTabPerWindow: activeTabPerWindow,
+      trackedFocusedWindowId: focusedWindowId,
+    });
+  } catch (err) {
+    console.warn("[DevBrain] Failed to persist tracking state:", err);
+  }
+}
+
+/** Restore tracking state captured before SW suspension. */
+async function hydrateTrackingState() {
+  if (trackingStateHydrated) return;
+  try {
+    const data = await chrome.storage.local.get([
+      "trackedActiveTabs",
+      "trackedActiveTabPerWindow",
+      "trackedFocusedWindowId",
+    ]);
+
+    Object.assign(activeTabs, data.trackedActiveTabs || {});
+    Object.assign(activeTabPerWindow, data.trackedActiveTabPerWindow || {});
+    if (typeof data.trackedFocusedWindowId === "number") {
+      focusedWindowId = data.trackedFocusedWindowId;
+    }
+  } catch (err) {
+    console.warn("[DevBrain] Failed to hydrate tracking state:", err);
+  } finally {
+    trackingStateHydrated = true;
+  }
+}
+
+/**
+ * MV3 service workers reset in-memory state when suspended.
+ * Recover focused window + active tab so tracking resumes after wake-up.
+ */
+async function recoverFocusedContext() {
+  if (recoveryInProgress) return;
+  recoveryInProgress = true;
+  try {
+    await hydrateTrackingState();
+
+    const win = await chrome.windows.getLastFocused({ populate: false });
+    if (!win || !win.focused || win.id === chrome.windows.WINDOW_ID_NONE) {
+      focusedWindowId = chrome.windows.WINDOW_ID_NONE;
+      await persistTrackingState();
+      return;
+    }
+
+    focusedWindowId = win.id;
+    const [activeTab] = await chrome.tabs.query({ active: true, windowId: win.id });
+    if (!activeTab || shouldIgnoreUrl(activeTab.url)) return;
+
+    activeTabPerWindow[win.id] = activeTab.id;
+    if (activeTabs[activeTab.id]) {
+      resumeTrackingTab(activeTab.id);
+    } else {
+      startTrackingTab(activeTab.id, activeTab.url, activeTab.title, win.id);
+    }
+    await persistTrackingState();
+  } catch (err) {
+    console.warn("[DevBrain] Failed to recover focused context:", err);
+  } finally {
+    recoveryInProgress = false;
+  }
+}
 
 async function refreshAccessToken(endpointBase, refreshToken) {
   if (!refreshToken) return null;
@@ -237,6 +311,7 @@ function startTrackingTab(tabId, url, title, windowId) {
     accumulatedMs: 0,
     windowId: windowId ?? null,
   };
+  void persistTrackingState();
   console.log(`[DevBrain] ▶ Focus started: tab=${tabId} url=${url}`);
 }
 
@@ -246,6 +321,7 @@ function pauseTrackingTab(tabId) {
   if (!info || info.startTime == null) return;
   info.accumulatedMs += Date.now() - info.startTime;
   info.startTime = null;
+  void persistTrackingState();
 }
 
 /** Resume timer after pause (keeps previously accumulated active time). */
@@ -253,6 +329,7 @@ function resumeTrackingTab(tabId) {
   const info = activeTabs[tabId];
   if (!info || info.startTime != null) return;
   info.startTime = Date.now();
+  void persistTrackingState();
 }
 
 /**
@@ -260,6 +337,7 @@ function resumeTrackingTab(tabId) {
  * Computes time spent and enqueues a `website_visit` event.
  */
 async function stopTrackingTab(tabId) {
+  await hydrateTrackingState();
   const info = activeTabs[tabId];
   if (!info) {
     console.log(`[DevBrain] ⏹ stopTrackingTab(${tabId}) — no active info (SW may have restarted)`);
@@ -269,6 +347,7 @@ async function stopTrackingTab(tabId) {
   const runningMs = info.startTime == null ? 0 : (Date.now() - info.startTime);
   const timeSpentMs = (info.accumulatedMs ?? 0) + runningMs;
   delete activeTabs[tabId];
+  await persistTrackingState();
 
   // Ignore visits shorter than 2 seconds (likely accidental/redirects)
   if (timeSpentMs < 2000) {
@@ -298,12 +377,20 @@ async function stopTrackingTab(tabId) {
  * via activeTabPerWindow.
  */
 chrome.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
+  await hydrateTrackingState();
+
+  // SW may have restarted and lost focus state; recover it lazily.
+  if (focusedWindowId === -1) {
+    await recoverFocusedContext();
+  }
+
   // Stop tracking the previous tab in this window (flushes its website_visit)
   const prevTabId = activeTabPerWindow[windowId];
   if (prevTabId !== undefined && prevTabId !== tabId) {
     await stopTrackingTab(prevTabId);
   }
   activeTabPerWindow[windowId] = tabId;
+  await persistTrackingState();
 
   // Only time the new tab if this window currently has OS focus
   if (windowId !== focusedWindowId) return;
@@ -324,6 +411,8 @@ chrome.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
  * the timer for the new URL (only if it's still the active, focused tab).
  */
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  await hydrateTrackingState();
+
   // URL change means user is leaving the previous page in this tab.
   // Flush FIRST so the visit is attributed to the page being left, not the new URL.
   if (changeInfo.url) {
@@ -344,6 +433,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   // If already tracking this tab, keep metadata fresh without resetting time.
   if (activeTabs[tabId]) {
     activeTabs[tabId].title = tab.title ?? activeTabs[tabId].title;
+    await persistTrackingState();
     return;
   }
 
@@ -359,8 +449,10 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
  * Fired when a tab is closed. Record whatever focus time it accumulated.
  */
 chrome.tabs.onRemoved.addListener(async (tabId, removeInfo) => {
+  await hydrateTrackingState();
   await stopTrackingTab(tabId);
   delete activeTabPerWindow[removeInfo.windowId];
+  await persistTrackingState();
 });
 
 /**
@@ -368,12 +460,15 @@ chrome.tabs.onRemoved.addListener(async (tabId, removeInfo) => {
  * Stop all timers when focus leaves; resume for the active tab when focus returns.
  */
 chrome.windows.onFocusChanged.addListener(async (windowId) => {
+  await hydrateTrackingState();
+
   // Pause all running timers (do not emit while user is just unfocused)
   for (const id of Object.keys(activeTabs)) {
     pauseTrackingTab(Number(id));
   }
 
   focusedWindowId = windowId;
+  await persistTrackingState();
 
   if (windowId === chrome.windows.WINDOW_ID_NONE) {
     console.log("[DevBrain] Chrome lost OS focus — all timers paused.");
@@ -401,6 +496,7 @@ chrome.windows.onFocusChanged.addListener(async (windowId) => {
 chrome.idle.setDetectionInterval(IDLE_THRESHOLD_SEC);
 
 chrome.idle.onStateChanged.addListener(async (state) => {
+  await hydrateTrackingState();
   if (state === "idle" || state === "locked") {
     // Pause all running timers (no emit on idle)
     for (const tabId of Object.keys(activeTabs)) {
@@ -461,10 +557,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // Startup: re-hydrate queue + find the focused window and start timing
 // ---------------------------------------------------------------------------
 (async () => {
+  await hydrateTrackingState();
+
   // Setup side panel behavior to open when extension icon is clicked
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
     .catch((error) => console.error("[DevBrain] Error setting side panel behavior:", error));
 
+  await recoverFocusedContext();
   console.log(`[DevBrain] Tracking ${Object.keys(activeTabs).length} tab(s) on startup.`);
 })();
 

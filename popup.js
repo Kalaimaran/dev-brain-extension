@@ -251,7 +251,7 @@ btnLogin.addEventListener("click", async () => {
     let lastError = "Login failed";
 
     for (const requestBody of attempts) {
-      const res = await fetch(`${endpoint}/api/v1/auth/login`, {
+      const res = await fetch(`${endpoint}/api/v1/auth/login/ext`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody),

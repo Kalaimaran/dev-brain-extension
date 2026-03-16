@@ -20,7 +20,7 @@ const PROD_ENDPOINT = "https://data-nexus-541643753386.asia-south1.run.app";
 const DEV_ENDPOINT = "http://localhost:8080";
 const DEFAULT_ENDPOINT = PROD_ENDPOINT;
 const EVENTS_PATH = "/api/events";
-const IDLE_THRESHOLD_SEC = 60;    // consider user idle after 60 s of inactivity
+const IDLE_THRESHOLD_SEC = 60; // consider user idle after 60 s of inactivity
 
 // ---------------------------------------------------------------------------
 // In-memory state (survives only while the service worker is alive)
@@ -130,7 +130,10 @@ async function recoverFocusedContext() {
     }
 
     focusedWindowId = win.id;
-    const [activeTab] = await chrome.tabs.query({ active: true, windowId: win.id });
+    const [activeTab] = await chrome.tabs.query({
+      active: true,
+      windowId: win.id,
+    });
     if (!activeTab || shouldIgnoreUrl(activeTab.url)) return;
 
     activeTabPerWindow[win.id] = activeTab.id;
@@ -202,11 +205,15 @@ let trackSearches = true;
 async function enqueueEvent(event) {
   // Check tracking toggles before queueing
   if (event.eventType === "website_visit" && !trackVisits) {
-    console.log(`[DevBrain] 🚫 Ignored website_visit event (tracking disabled)`);
+    console.log(
+      `[DevBrain] 🚫 Ignored website_visit event (tracking disabled)`,
+    );
     return;
   }
   if (event.eventType === "website_search" && !trackSearches) {
-    console.log(`[DevBrain] 🚫 Ignored website_search event (tracking disabled)`);
+    console.log(
+      `[DevBrain] 🚫 Ignored website_search event (tracking disabled)`,
+    );
     return;
   }
 
@@ -214,7 +221,8 @@ async function enqueueEvent(event) {
   eventQueue.push(entry);
 
   // Persist to storage so the event survives a SW restart
-  const { pendingEvents = [] } = await chrome.storage.local.get("pendingEvents");
+  const { pendingEvents = [] } =
+    await chrome.storage.local.get("pendingEvents");
   await chrome.storage.local.set({ pendingEvents: [...pendingEvents, entry] });
 
   console.log(`[DevBrain] Queued event: type=${entry.eventType}`, entry);
@@ -231,10 +239,16 @@ async function flushEvents() {
   // Use the persisted queue as the single source of truth.
   // (enqueueEvent writes to storage; the in-memory eventQueue is just a warm
   // cache — merging both would create duplicates, so we only use storage here.)
-  const { pendingEvents = [] } = await chrome.storage.local.get("pendingEvents");
+  const { pendingEvents = [] } =
+    await chrome.storage.local.get("pendingEvents");
 
   const local = await chrome.storage.local.get(["accessToken", "endpoint"]);
-  const sync  = await chrome.storage.sync.get(["accessToken", "endpoint", "refreshToken", "developerMode"]);
+  const sync = await chrome.storage.sync.get([
+    "accessToken",
+    "endpoint",
+    "refreshToken",
+    "developerMode",
+  ]);
   const accessToken = local.accessToken || sync.accessToken || null;
   const refreshToken = sync.refreshToken || null;
   const endpointBase = (
@@ -246,7 +260,7 @@ async function flushEvents() {
   const eventsEndpoint = `${endpointBase}${EVENTS_PATH}`;
 
   console.log(
-    `[DevBrain] flushEvents() — queue=${pendingEvents.length} event(s), accessToken=${accessToken ? "✓ present" : "✗ missing"}`
+    `[DevBrain] flushEvents() — queue=${pendingEvents.length} event(s), accessToken=${accessToken ? "✓ present" : "✗ missing"}`,
   );
 
   if (pendingEvents.length === 0) {
@@ -255,13 +269,17 @@ async function flushEvents() {
   }
 
   if (!accessToken) {
-    console.warn("[DevBrain] No access token — events are queued locally until user logs in from popup.");
+    console.warn(
+      "[DevBrain] No access token — events are queued locally until user logs in from popup.",
+    );
     return;
   }
 
   const payload = { events: pendingEvents };
 
-  console.log(`[DevBrain] Sending ${pendingEvents.length} event(s) to ${eventsEndpoint}`);
+  console.log(
+    `[DevBrain] Sending ${pendingEvents.length} event(s) to ${eventsEndpoint}`,
+  );
   console.log("[DevBrain] Payload:", JSON.stringify(payload, null, 2));
 
   try {
@@ -275,7 +293,10 @@ async function flushEvents() {
     });
 
     if (res.status === 401 && refreshToken) {
-      const newAccessToken = await refreshAccessToken(endpointBase, refreshToken);
+      const newAccessToken = await refreshAccessToken(
+        endpointBase,
+        refreshToken,
+      );
       if (newAccessToken) {
         res = await fetch(eventsEndpoint, {
           method: "POST",
@@ -294,9 +315,13 @@ async function flushEvents() {
       // Clear both in-memory cache and persisted queue
       eventQueue = [];
       await chrome.storage.local.set({ pendingEvents: [] });
-      console.log(`[DevBrain] ✓ Flushed successfully. Status=${res.status} Response=${responseText}`);
+      console.log(
+        `[DevBrain] ✓ Flushed successfully. Status=${res.status} Response=${responseText}`,
+      );
     } else {
-      console.error(`[DevBrain] ✗ Flush failed. Status=${res.status} Response=${responseText}`);
+      console.error(
+        `[DevBrain] ✗ Flush failed. Status=${res.status} Response=${responseText}`,
+      );
     }
   } catch (err) {
     console.error("[DevBrain] ✗ Network error during flush:", err.message, err);
@@ -351,22 +376,28 @@ async function stopTrackingTab(tabId) {
   await hydrateTrackingState();
   const info = activeTabs[tabId];
   if (!info) {
-    console.log(`[DevBrain] ⏹ stopTrackingTab(${tabId}) — no active info (SW may have restarted)`);
+    console.log(
+      `[DevBrain] ⏹ stopTrackingTab(${tabId}) — no active info (SW may have restarted)`,
+    );
     return;
   }
 
-  const runningMs = info.startTime == null ? 0 : (Date.now() - info.startTime);
+  const runningMs = info.startTime == null ? 0 : Date.now() - info.startTime;
   const timeSpentMs = (info.accumulatedMs ?? 0) + runningMs;
   delete activeTabs[tabId];
   await persistTrackingState();
 
   // Ignore visits shorter than 2 seconds (likely accidental/redirects)
   if (timeSpentMs < 2000) {
-    console.log(`[DevBrain] ⏹ stopTrackingTab(${tabId}) — skipped (${timeSpentMs}ms < 2s threshold)`);
+    console.log(
+      `[DevBrain] ⏹ stopTrackingTab(${tabId}) — skipped (${timeSpentMs}ms < 2s threshold)`,
+    );
     return;
   }
 
-  console.log(`[DevBrain] ⏹ Recording website_visit: tab=${tabId} url=${info.url} time=${timeSpentMs}ms`);
+  console.log(
+    `[DevBrain] ⏹ Recording website_visit: tab=${tabId} url=${info.url} time=${timeSpentMs}ms`,
+  );
 
   await enqueueEvent({
     eventType: "website_visit",
@@ -433,7 +464,11 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
     // Start timing the new URL immediately for SPA navigation where "complete"
     // may never fire after pushState/replaceState.
-    if (tab.active && tab.windowId === focusedWindowId && !shouldIgnoreUrl(changeInfo.url)) {
+    if (
+      tab.active &&
+      tab.windowId === focusedWindowId &&
+      !shouldIgnoreUrl(changeInfo.url)
+    ) {
       startTrackingTab(tabId, changeInfo.url, tab.title, tab.windowId);
     }
     return;
@@ -494,7 +529,12 @@ chrome.windows.onFocusChanged.addListener(async (windowId) => {
       if (activeTabs[activeTab.id]) {
         resumeTrackingTab(activeTab.id);
       } else {
-        startTrackingTab(activeTab.id, activeTab.url, activeTab.title, windowId);
+        startTrackingTab(
+          activeTab.id,
+          activeTab.url,
+          activeTab.title,
+          windowId,
+        );
       }
     }
   } catch {}
@@ -516,14 +556,25 @@ chrome.idle.onStateChanged.addListener(async (state) => {
     console.log("[DevBrain] User idle/locked — all timers paused.");
   } else if (state === "active") {
     // Resume timing the active tab in the focused window
-    if (focusedWindowId !== -1 && focusedWindowId !== chrome.windows.WINDOW_ID_NONE) {
+    if (
+      focusedWindowId !== -1 &&
+      focusedWindowId !== chrome.windows.WINDOW_ID_NONE
+    ) {
       try {
-        const [activeTab] = await chrome.tabs.query({ active: true, windowId: focusedWindowId });
+        const [activeTab] = await chrome.tabs.query({
+          active: true,
+          windowId: focusedWindowId,
+        });
         if (activeTab && !shouldIgnoreUrl(activeTab.url)) {
           if (activeTabs[activeTab.id]) {
             resumeTrackingTab(activeTab.id);
           } else {
-            startTrackingTab(activeTab.id, activeTab.url, activeTab.title, focusedWindowId);
+            startTrackingTab(
+              activeTab.id,
+              activeTab.url,
+              activeTab.title,
+              focusedWindowId,
+            );
           }
         }
       } catch {}
@@ -534,6 +585,26 @@ chrome.idle.onStateChanged.addListener(async (state) => {
 // ---------------------------------------------------------------------------
 // Message handler — receives events from content scripts
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Shell History — message handler
+// ---------------------------------------------------------------------------
+
+// Popup sends pre-built events; background queues and flushes to API.
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "HISTORY_FLUSH_EVENTS") {
+    (async () => {
+      const events = message.events ?? [];
+      if (events.length > 0) {
+        const { pendingEvents = [] } = await chrome.storage.local.get("pendingEvents");
+        await chrome.storage.local.set({ pendingEvents: [...pendingEvents, ...events] });
+        await flushEvents();
+      }
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
+});
 
 /**
  * Content scripts and popup use chrome.runtime.sendMessage() to
@@ -550,10 +621,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const enriched = {
       ...message,
       tabId: message.tabId ?? sender.tab?.id,
-      domain: message.domain ?? (sender.tab?.url ? extractDomain(sender.tab.url) : undefined),
+      domain:
+        message.domain ??
+        (sender.tab?.url ? extractDomain(sender.tab.url) : undefined),
     };
 
-    console.log(`[DevBrain] Message received: type=${enriched.eventType}`, enriched);
+    console.log(
+      `[DevBrain] Message received: type=${enriched.eventType}`,
+      enriched,
+    );
     await enqueueEvent(enriched);
     sendResponse({ ok: true });
   })();
@@ -571,11 +647,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   await hydrateTrackingState();
 
   // Setup side panel behavior to open when extension icon is clicked
-  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
-    .catch((error) => console.error("[DevBrain] Error setting side panel behavior:", error));
+  chrome.sidePanel
+    .setPanelBehavior({ openPanelOnActionClick: true })
+    .catch((error) =>
+      console.error("[DevBrain] Error setting side panel behavior:", error),
+    );
 
   await recoverFocusedContext();
-  console.log(`[DevBrain] Tracking ${Object.keys(activeTabs).length} tab(s) on startup.`);
+  console.log(
+    `[DevBrain] Tracking ${Object.keys(activeTabs).length} tab(s) on startup.`,
+  );
+
 })();
 
 // ---------------------------------------------------------------------------

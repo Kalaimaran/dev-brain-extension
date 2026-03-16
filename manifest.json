@@ -12,7 +12,8 @@
     "webNavigation",
     "idle",
     "windows",
-    "sidePanel"
+    "sidePanel",
+    "alarms"
   ],
 
   "host_permissions": [

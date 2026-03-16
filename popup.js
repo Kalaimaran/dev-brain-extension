@@ -14,6 +14,7 @@
 // ---------------------------------------------------------------------------
 const PROD_ENDPOINT = "https://data-nexus-541643753386.asia-south1.run.app";
 const DEV_ENDPOINT = "http://localhost:8080";
+const REDIRECT_BASE_URL = "https://dev-brain-hub-541643753386.asia-south1.run.app";
 
 const statusDot     = document.getElementById("statusDot");
 const statusText    = document.getElementById("statusText");
@@ -45,10 +46,329 @@ const btnSaveConversation = document.getElementById("btnSaveConversation");
 const statusTranscript    = document.getElementById("statusTranscript");
 const statusConversation  = document.getElementById("statusConversation");
 
+const toggleHistorySync   = document.getElementById("toggleHistorySync");
+const historySyncBody     = document.getElementById("historySyncBody");
+const btnPickHistory      = document.getElementById("btnPickHistory");
+const btnHistorySyncNow   = document.getElementById("btnHistorySyncNow");
+const historyStatusDot    = document.getElementById("historyStatusDot");
+const historyStatusText   = document.getElementById("historyStatusText");
+const feedbackHistory     = document.getElementById("feedbackHistory");
+const historyStatsRow     = document.getElementById("historyStatsRow");
+const historyStatTotal    = document.getElementById("historyStatTotal");
+const historyStatSynced   = document.getElementById("historyStatSynced");
+const historyStatPending  = document.getElementById("historyStatPending");
+const historyStatLastSync = document.getElementById("historyStatLastSync");
+
+let currentFileHandle = null;    // in-memory fallback when IDB persistence fails
+
+// ---------------------------------------------------------------------------
+// Search panel — DOM references + state
+// ---------------------------------------------------------------------------
+const tabBtnView       = document.getElementById("tabBtnView");
+const tabBtnSearch     = document.getElementById("tabBtnSearch");
+const panelView        = document.getElementById("panelView");
+const panelSearch      = document.getElementById("panelSearch");
+const searchForm       = document.getElementById("searchForm");
+const searchInput      = document.getElementById("searchInput");
+const filterTypes      = document.getElementById("filterTypes");
+const filterDates      = document.getElementById("filterDates");
+const searchResults    = document.getElementById("searchResults");
+const searchPagination = document.getElementById("searchPagination");
+
+const searchState = { page: 0, limit: 10, total: 0 };
+
+// ---------------------------------------------------------------------------
+// Shell History — IndexedDB helpers (FileSystemFileHandle can't go in storage)
+// ---------------------------------------------------------------------------
+function openHistoryIdb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open("devbrain-history", 2);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains("handles")) {
+        req.result.createObjectStore("handles");
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror   = () => reject(req.error);
+  });
+}
+function idbGet(db, key) {
+  return new Promise((resolve, reject) => {
+    const req = db.transaction("handles", "readonly").objectStore("handles").get(key);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror   = () => reject(req.error);
+  });
+}
+function idbSet(db, key, value) {
+  return new Promise((resolve, reject) => {
+    const req = db.transaction("handles", "readwrite").objectStore("handles").put(value, key);
+    req.onsuccess = () => resolve();
+    req.onerror   = () => reject(req.error);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Shell History — parsers (popup owns all history logic)
+// ---------------------------------------------------------------------------
+function parseZshHistory(text) {
+  const entries = [];
+  const lines = text.split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    const m = lines[i].match(/^: (\d+):\d+;(.*)$/);
+    if (m) {
+      let cmd = m[2];
+      while (cmd.endsWith("\\") && i + 1 < lines.length) {
+        i++;
+        cmd = cmd.slice(0, -1) + "\n" + lines[i];
+      }
+      if (cmd.trim())
+        entries.push({ ts: parseInt(m[1], 10) * 1000, command: cmd.trim() });
+    }
+    i++;
+  }
+  // Fallback: plain-text history (no EXTENDED_HISTORY / no timestamps)
+  if (entries.length === 0) {
+    for (const line of lines) {
+      const cmd = line.trim();
+      if (cmd && !cmd.startsWith("#"))
+        entries.push({ ts: null, command: cmd });
+    }
+  }
+  return entries;
+}
+
+function parseBashHistory(text) {
+  const entries = [];
+  let ts = null;
+  for (const line of text.split("\n")) {
+    if (/^#\d+$/.test(line.trim())) { ts = parseInt(line.slice(1), 10) * 1000; continue; }
+    if (line.trim()) { entries.push({ ts, command: line.trim() }); ts = null; }
+  }
+  return entries;
+}
+
+// Reads the history file directly and updates the count display.
+// Called once on popup open and again after a sync to refresh numbers.
+async function refreshHistoryDisplay() {
+  try {
+    const { historySync: sync = {} } = await chrome.storage.local.get("historySync");
+    if (sync?.syncEnabled === false) return;
+
+    let handle = currentFileHandle;
+    if (!handle) {
+      try {
+        const db = await openHistoryIdb();
+        handle = await idbGet(db, "fileHandle");
+        if (handle) currentFileHandle = handle;
+      } catch { /* IDB unavailable */ }
+    }
+    if (!handle) return;
+
+    const perm = await handle.queryPermission({ mode: "read" });
+    if (perm === "denied") {
+      historyStatusText.textContent = "Access denied — pick a new file";
+      historyStatusDot.className = "status-dot";
+      return;
+    }
+    if (perm === "prompt") {
+      if (sync.fileName) {
+        historyStatusText.textContent = `${sync.fileName} — tap 📂 to reconnect`;
+        historyStatusDot.className = "status-dot";
+      }
+      return;
+    }
+
+    const file    = await handle.getFile();
+    const buf     = await file.arrayBuffer();
+    const text    = new TextDecoder("utf-8", { fatal: false }).decode(buf);
+    const isZsh   = handle.name.toLowerCase().includes("zsh");
+    const entries = isZsh ? parseZshHistory(text) : parseBashHistory(text);
+
+    const total   = entries.length;
+    const synced  = Math.min(sync.entryCount ?? 0, total);
+    const pending = Math.max(0, total - synced);
+
+    historyStatTotal.textContent   = total.toLocaleString();
+    historyStatSynced.textContent  = synced.toLocaleString();
+    historyStatPending.textContent = pending.toLocaleString();
+    historyStatsRow.style.display  = "flex";
+    btnHistorySyncNow.disabled     = pending === 0;
+  } catch (err) {
+    console.warn("[DevBrain] refreshHistoryDisplay:", err.name, err.message);
+  }
+}
+
+function timeAgo(date) {
+  const s = Math.floor((Date.now() - new Date(date)) / 1000);
+  if (s < 60)   return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  return `${Math.floor(s / 3600)}h ago`;
+}
+
+// Re-grant FileSystemFileHandle permission during DOMContentLoaded (user-gesture window).
+// Permissions reset to "prompt" on every panel open — this silently re-grants them.
+async function warmUpHistoryPermission() {
+  try {
+    const db = await openHistoryIdb();
+    const handle = await idbGet(db, "fileHandle");
+    if (!handle) return;
+    // requestPermission() is idempotent: returns "granted" immediately if already
+    // allowed, and only shows a prompt if in "prompt" state. Skipping queryPermission()
+    // removes one async IDB round-trip and maximises our chance of calling
+    // requestPermission() while still within the user-gesture activation window.
+    const result = await handle.requestPermission({ mode: "read" });
+    if (result === "granted") currentFileHandle = handle;
+  } catch { /* non-fatal — gesture window may have expired or IDB unavailable */ }
+}
+
+async function loadHistoryStatus() {
+  const { historySync: sync = {} } = await chrome.storage.local.get("historySync");
+  const enabled = sync.syncEnabled !== false;
+  toggleHistorySync.checked = enabled;
+  historySyncBody.style.display = enabled ? "block" : "none";
+
+  if (!sync.fileName) {
+    historyStatusDot.className = "status-dot";
+    historyStatusText.textContent = "No file selected";
+    historyStatsRow.style.display = "none";
+    btnHistorySyncNow.disabled = true;
+    return;
+  }
+
+  historyStatusDot.className = "status-dot active";
+  historyStatusText.textContent = sync.fileName;
+  historyStatLastSync.textContent = sync.lastSyncAt ? timeAgo(sync.lastSyncAt) : "Never";
+}
+
+
+// ---------------------------------------------------------------------------
+// Shell History — event listeners
+// ---------------------------------------------------------------------------
+toggleHistorySync.addEventListener("change", async () => {
+  const { historySync: sync = {} } = await chrome.storage.local.get("historySync");
+  await chrome.storage.local.set({ historySync: { ...sync, syncEnabled: toggleHistorySync.checked } });
+  historySyncBody.style.display = toggleHistorySync.checked ? "block" : "none";
+});
+
+btnPickHistory.addEventListener("click", async () => {
+  // This handler always runs with a user gesture — safe to call requestPermission.
+  try {
+    let db;
+    try { db = await openHistoryIdb(); } catch { /* IDB unavailable */ }
+
+    // ── Step 1: Re-grant permission on existing handle (avoids picker) ──
+    if (db) {
+      const existing = await idbGet(db, "fileHandle").catch(() => null);
+      if (existing) {
+        try {
+          const perm = await existing.requestPermission({ mode: "read" });
+          if (perm === "granted") {
+            currentFileHandle = existing;
+            await loadHistoryStatus();
+            await refreshHistoryDisplay();
+            showFeedback(feedbackHistory, `Reconnected: ${existing.name}`, "ok");
+            return;
+          }
+        } catch { /* fall through to file picker */ }
+      }
+    }
+
+    // ── Step 2: Pick a new file ──
+    const [handle] = await window.showOpenFilePicker({ multiple: false });
+    currentFileHandle = handle;
+
+    // ── Step 3: Persist handle in IDB ──
+    try {
+      if (!db) db = await openHistoryIdb();
+      await idbSet(db, "fileHandle", handle);
+    } catch (idbErr) {
+      console.warn("[DevBrain] IDB persist failed:", idbErr.name, idbErr.message);
+    }
+
+    // ── Step 4: Reset sync state ──
+    const { historySync: sync = {} } = await chrome.storage.local.get("historySync");
+    await chrome.storage.local.set({
+      historySync: { ...sync, fileName: handle.name, entryCount: 0, lastSyncAt: null },
+    });
+
+    await loadHistoryStatus();
+    await refreshHistoryDisplay();
+    showFeedback(feedbackHistory, `Selected: ${handle.name}`, "ok");
+
+  } catch (err) {
+    if (err.name !== "AbortError") {
+      console.error("[DevBrain] btnPickHistory:", err.name, err.message, err);
+      showFeedback(feedbackHistory, `${err.name}: ${err.message || "see DevTools console"}`, "err");
+    }
+  }
+});
+
+btnHistorySyncNow.addEventListener("click", async () => {
+  try {
+    const handle = currentFileHandle;
+    if (!handle) { showFeedback(feedbackHistory, "No file — pick one first", "err"); return; }
+
+    const file    = await handle.getFile();
+    const buf     = await file.arrayBuffer();
+    const text    = new TextDecoder("utf-8", { fatal: false }).decode(buf);
+    const isZsh   = handle.name.toLowerCase().includes("zsh");
+    const entries = isZsh ? parseZshHistory(text) : parseBashHistory(text);
+
+    const { historySync: sync = {} } = await chrome.storage.local.get("historySync");
+    const prevCount  = sync.entryCount ?? 0;
+    const newEntries = entries.slice(prevCount);
+
+    if (newEntries.length === 0) {
+      showFeedback(feedbackHistory, "Already up to date", "ok");
+      return;
+    }
+
+    const tsNow  = new Date().toISOString();
+    const events = newEntries.map(e => {
+      const cmd = e.command ?? "";
+      return {
+        eventType : "terminal_command",
+        domain    : "shell history",
+        query     : cmd,
+        pageTitle : `[shell_history] ${cmd.split(" ").slice(0, 3).join(" ")}`,
+        pageText  : JSON.stringify({ command: cmd, source: "shell_history" }),
+        timestamp : e.ts ? new Date(e.ts).toISOString() : tsNow,
+      };
+    });
+
+    showFeedback(feedbackHistory, `Syncing ${newEntries.length} commands...`, "ok");
+
+    chrome.runtime.sendMessage({ type: "HISTORY_FLUSH_EVENTS", events }, async () => {
+      void chrome.runtime.lastError;
+      await chrome.storage.local.set({
+        historySync: { ...sync, entryCount: entries.length, lastSyncAt: tsNow },
+      });
+      await loadHistoryStatus();
+      await refreshHistoryDisplay();
+      showFeedback(feedbackHistory, `Synced ${newEntries.length} commands`, "ok");
+    });
+
+  } catch (err) {
+    showFeedback(feedbackHistory, `${err.name}: ${err.message}`, "err");
+  }
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.historySync) {
+    loadHistoryStatus();
+    refreshHistoryDisplay();
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
 document.addEventListener("DOMContentLoaded", async () => {
+  // warmUpHistoryPermission MUST be first — it calls requestPermission which requires
+  // user activation. The activation window (from clicking the extension icon) expires
+  // after the first few awaits, so this must run before loadSettings() etc.
+  await warmUpHistoryPermission();
   await loadSettings();
   await ensureValidSession();
   await hydrateAuthUI();
@@ -57,6 +377,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   await refreshStats();
   registerLiveRefreshListeners();
   registerProfileMenuListeners();
+  await loadHistoryStatus();
+  await refreshHistoryDisplay();    // read file directly on panel open, update counts
 });
 
 // ---------------------------------------------------------------------------
@@ -598,6 +920,8 @@ function registerLiveRefreshListeners() {
   chrome.windows.onFocusChanged.addListener(() => {
     schedulePanelRefresh();
   });
+
+  // History sync is manual only — popup reads the file directly on open and on sync click.
 }
 
 // ---------------------------------------------------------------------------
@@ -692,3 +1016,359 @@ btnSaveConversation.addEventListener("click", async () => {
     console.error("[DevBrain] Save conversation error:", err);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Tab switching
+// ---------------------------------------------------------------------------
+tabBtnView.addEventListener("click", () => {
+  tabBtnView.classList.add("active");
+  tabBtnSearch.classList.remove("active");
+  panelView.hidden = false;
+  panelSearch.hidden = true;
+  document.body.classList.remove("search-active");
+});
+
+tabBtnSearch.addEventListener("click", () => {
+  tabBtnSearch.classList.add("active");
+  tabBtnView.classList.remove("active");
+  panelSearch.hidden = false;
+  panelView.hidden = true;
+  document.body.classList.add("search-active");
+  setTimeout(() => searchInput.focus(), 50);
+});
+
+// ---------------------------------------------------------------------------
+// Search — filter chip + form listeners
+// ---------------------------------------------------------------------------
+filterTypes.addEventListener("click", (e) => {
+  const chip = e.target.closest(".chip");
+  if (!chip) return;
+  chip.classList.toggle("active");
+  searchState.page = 0;
+  performSearch();
+});
+
+filterDates.addEventListener("click", (e) => {
+  const chip = e.target.closest(".chip");
+  if (!chip) return;
+  filterDates.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+  chip.classList.add("active");
+  searchState.page = 0;
+  performSearch();
+});
+
+searchForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  searchState.page = 0;
+  performSearch();
+});
+
+// Click delegation: terminal card = copy; URL card = open tab
+searchResults.addEventListener("click", (e) => {
+  const copyBtn = e.target.closest("[data-action='copy']");
+  if (copyBtn) {
+    const termCard = e.target.closest(".result-card[data-cmd]");
+    if (!termCard) return;
+    navigator.clipboard.writeText(termCard.dataset.cmd || "").then(() => {
+      termCard.setAttribute("data-copied", "true");
+      setTimeout(() => termCard.removeAttribute("data-copied"), 1500);
+    }).catch(() => {});
+    return;
+  }
+
+  const termCard = e.target.closest(".result-card[data-cmd]");
+  if (termCard) {
+    navigator.clipboard.writeText(termCard.dataset.cmd || "").then(() => {
+      termCard.setAttribute("data-copied", "true");
+      setTimeout(() => termCard.removeAttribute("data-copied"), 1500);
+    }).catch(() => {});
+    return;
+  }
+  const urlCard = e.target.closest(".result-card[data-url]");
+  if (urlCard) chrome.tabs.create({ url: urlCard.dataset.url });
+});
+
+searchPagination.addEventListener("click", (e) => {
+  const btn = e.target.closest("button");
+  if (!btn) return;
+  if (btn.id === "searchPrevBtn") { searchState.page = Math.max(0, searchState.page - 1); performSearch(); }
+  else if (btn.id === "searchNextBtn") { searchState.page++; performSearch(); }
+});
+
+// ---------------------------------------------------------------------------
+// Search — core
+// ---------------------------------------------------------------------------
+async function performSearch() {
+  const q           = searchInput.value.trim();
+  const activeTypes = [...filterTypes.querySelectorAll(".chip.active")].map(c => c.dataset.type);
+  const activeDate  = filterDates.querySelector(".chip.active")?.dataset.date ?? "";
+
+  // Require at least a query or a type filter to avoid fetching everything
+  if (!q && activeTypes.length === 0) {
+    searchResults.innerHTML = '<div class="search-empty">Type to search your activity.</div>';
+    searchPagination.hidden = true;
+    return;
+  }
+
+  const auth = await getAuthState();
+  if (!auth?.accessToken) {
+    searchResults.innerHTML = '<div class="search-empty">Please login to search.</div>';
+    return;
+  }
+
+  const params = new URLSearchParams();
+  if (q)                  params.set("q",     q);
+  if (activeTypes.length) params.set("types", activeTypes.join(","));
+  if (activeDate === "today") {
+    params.set("startDate", new Date().toISOString().split("T")[0]);
+  } else if (activeDate === "7d") {
+    const d = new Date(); d.setDate(d.getDate() - 7);
+    params.set("startDate", d.toISOString().split("T")[0]);
+  } else if (activeDate === "30d") {
+    const d = new Date(); d.setDate(d.getDate() - 30);
+    params.set("startDate", d.toISOString().split("T")[0]);
+  }
+  params.set("page",  String(searchState.page));
+  params.set("limit", String(searchState.limit));
+
+  showSearchSkeleton();
+  searchPagination.hidden = true;
+
+  try {
+    const res = await fetch(`${auth.endpoint}/api/events/search?${params}`, {
+      headers: { Authorization: `Bearer ${auth.accessToken}` },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const body  = await res.json();
+    const items = body.data?.items ?? body.items ?? [];
+    const total = body.data?.total ?? body.total ?? 0;
+    searchState.total = total;
+    renderSearchResults(items, total, auth.endpoint);
+  } catch (err) {
+    searchResults.innerHTML = `<div class="search-empty">Error: ${escHtml(err.message)}</div>`;
+  }
+}
+
+function renderSearchResults(items, total, endpoint = "") {
+  searchResults.scrollTop = 0;
+
+  if (items.length === 0) {
+    searchResults.innerHTML = '<div class="search-empty"><div class="search-empty-icon">🔍</div>No results found.</div>';
+    searchPagination.hidden = true;
+    return;
+  }
+
+  searchResults.innerHTML = "";
+  const q = searchInput.value.trim();
+
+  // Result count header
+  if (total > 0) {
+    const countEl = document.createElement("div");
+    countEl.className = "search-count";
+    countEl.textContent = `${total.toLocaleString()} result${total === 1 ? "" : "s"}${q ? ` for "${q}"` : ""}`;
+    searchResults.appendChild(countEl);
+  }
+
+  const frag = document.createDocumentFragment();
+
+  items.forEach((item) => {
+    const src        = item.source ?? "web";
+    const title      = getResultTitle(item);
+    const preview    = getResultPreview(item);
+    const dateStr    = item.created_at ? formatResultDate(item.created_at) : "";
+    const isTerminal = src === "terminal";
+
+    // Resolve URL
+    const url = resolveResultUrl(item, src, endpoint);
+
+    const card = document.createElement("div");
+    card.className = "result-card";
+    if (url)        card.dataset.url = url;
+    if (isTerminal) card.dataset.cmd = title;
+
+    // Badge
+    const badge = document.createElement("span");
+    badge.className = `result-badge badge-${src}`;
+    badge.textContent = src;
+    card.appendChild(badge);
+
+    // Title
+    const titleEl = document.createElement("div");
+    titleEl.className = `result-title${isTerminal ? " terminal" : ""}`;
+    titleEl.innerHTML = highlight(title, q);
+    titleEl.title = title;
+    card.appendChild(titleEl);
+
+    // Preview snippet
+    if (preview) {
+      const prevEl = document.createElement("div");
+      prevEl.className = "result-preview";
+      prevEl.innerHTML = highlight(preview, q);
+      card.appendChild(prevEl);
+    }
+
+    // Footer: date + hint for terminal
+    const footer = document.createElement("div");
+    footer.className = "result-footer";
+    const dateEl = document.createElement("span");
+    dateEl.className = "result-date";
+    dateEl.textContent = dateStr;
+    footer.appendChild(dateEl);
+
+    if (isTerminal) {
+      const right = document.createElement("div");
+      right.className = "result-footer-right";
+      const hint = document.createElement("span");
+      hint.className = "result-date";
+      hint.textContent = "click to copy";
+      hint.style.opacity = "0.5";
+      const copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.className = "result-copy-btn";
+      copyBtn.textContent = "Copy";
+      copyBtn.setAttribute("data-action", "copy");
+      right.appendChild(hint);
+      right.appendChild(copyBtn);
+      footer.appendChild(right);
+    }
+    card.appendChild(footer);
+    frag.appendChild(card);
+  });
+
+  searchResults.appendChild(frag);
+
+  // Pagination
+  const totalPages = Math.ceil(total / searchState.limit);
+  if (totalPages > 1) {
+    searchPagination.hidden = false;
+    searchPagination.innerHTML = "";
+
+    const prev = document.createElement("button");
+    prev.id = "searchPrevBtn"; prev.className = "btn-ghost";
+    prev.style.cssText = "padding:3px 10px;font-size:11px;";
+    prev.textContent = "← Prev";
+    prev.disabled = searchState.page === 0;
+
+    const info = document.createElement("span");
+    info.textContent = `${searchState.page + 1} / ${totalPages}`;
+
+    const next = document.createElement("button");
+    next.id = "searchNextBtn"; next.className = "btn-ghost";
+    next.style.cssText = "padding:3px 10px;font-size:11px;";
+    next.textContent = "Next →";
+    next.disabled = (searchState.page + 1) >= totalPages;
+
+    searchPagination.appendChild(prev);
+    searchPagination.appendChild(info);
+    searchPagination.appendChild(next);
+  } else {
+    searchPagination.hidden = true;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Search — helpers
+// ---------------------------------------------------------------------------
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function showSearchSkeleton() {
+  searchResults.innerHTML = "";
+  const patterns = [["35%","85%","55%"], ["40%","70%","80%"], ["28%","90%","45%"]];
+  patterns.forEach((widths) => {
+    const card = document.createElement("div");
+    card.className = "skeleton-card";
+    card.style.marginBottom = "6px";
+    widths.forEach((w, j) => {
+      const line = document.createElement("div");
+      line.className = "skeleton-line";
+      line.style.cssText = `width:${w};${j < widths.length - 1 ? "margin-bottom:6px;" : ""}`;
+      card.appendChild(line);
+    });
+    searchResults.appendChild(card);
+  });
+}
+
+// XSS-safe: escapes text+query then wraps matched terms with <mark>
+function highlight(text, query) {
+  const safe = escHtml(String(text || ""));
+  if (!query) return safe;
+  const terms = escHtml(query.trim())
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  if (!terms.length) return safe;
+  return safe.replace(new RegExp(`(${terms.join("|")})`, "gi"), "<mark>$1</mark>");
+}
+
+function formatResultDate(iso) {
+  try {
+    const s = Math.floor((Date.now() - new Date(iso)) / 1000);
+    if (s < 60)    return `${s}s ago`;
+    if (s < 3600)  return `${Math.floor(s / 60)}m ago`;
+    if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+    const days = Math.floor(s / 86400);
+    if (days < 7)  return `${days}d ago`;
+    return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  } catch { return ""; }
+}
+
+function parseTerminalJson(text) {
+  try { const o = JSON.parse(text ?? ""); return o?.command ?? o?.query ?? null; } catch { return null; }
+}
+
+function parseUrlFromText(text) {
+  try {
+    const o = JSON.parse(text ?? "");
+    return o?.url || o?.pageUrl || o?.page_url || o?.link || o?.href || null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeUrl(url) {
+  if (!url) return null;
+  const trimmed = String(url).trim();
+  if (!trimmed) return null;
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
+}
+
+function resolveResultUrl(item, src, endpoint = "") {
+  const raw =
+    item.url ||
+    item.pageUrl ||
+    item.page_url ||
+    item.link ||
+    item.href ||
+    parseUrlFromText(item.pageText ?? item.page_text) ||
+    (src === "note"  && item.id ? `${REDIRECT_BASE_URL}/notes/${item.id}` : null) ||
+    (src === "issue" && item.id ? `${REDIRECT_BASE_URL}/issues/${item.id}` : null) ||
+    (item.domain ? item.domain : null);
+  return normalizeUrl(raw);
+}
+
+function getResultTitle(item) {
+  switch (item.source) {
+    case "terminal": {
+      const cmd = item.command || item.query
+        || parseTerminalJson(item.pageText ?? item.page_text)
+        || item.title || "";
+      return cmd || "(no command)";
+    }
+    case "ai":         return item.title || item.ai_service || "AI response";
+    case "note":       return item.title || "Untitled note";
+    case "issue":      return item.title || "Untitled issue";
+    case "transcript": return item.title || item.domain || "Transcript";
+    default:           return item.title || item.domain || item.url || "—";
+  }
+}
+
+function getResultPreview(item) {
+  return item.snippet || item.preview || item.summary || item.body || "";
+}

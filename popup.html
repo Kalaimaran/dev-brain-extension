@@ -1,629 +1,1228 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dev Brain Journal</title>
-  <style>
-    /* ------------------------------------------------------------------ */
-    /* Reset & base                                                         */
-    /* ------------------------------------------------------------------ */
-    *,
-    *::before,
-    *::after {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    :root {
-      --bg: #0f1117;
-      --surface: #1a1d27;
-      --border: #2a2d3a;
-      --accent: #6c63ff;
-      --accent-h: #8b83ff;
-      --green: #22c55e;
-      --red: #ef4444;
-      --text: #e2e8f0;
-      --muted: #64748b;
-      --radius: 10px;
-    }
-
-    body {
-      width: 340px;
-      min-height: 200px;
-      background: var(--bg);
-      color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      font-size: 13px;
-      line-height: 1.5;
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Header                                                               */
-    /* ------------------------------------------------------------------ */
-    .header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 16px 16px 12px;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      min-width: 0;
-    }
-
-    .header-icon {
-      width: 32px;
-      height: 32px;
-      background: var(--accent);
-      border-radius: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 18px;
-      flex-shrink: 0;
-    }
-
-    .header-title {
-      font-size: 15px;
-      font-weight: 600;
-    }
-
-    .header-sub {
-      font-size: 11px;
-      color: var(--muted);
-    }
-
-    .profile-wrap {
-      position: relative;
-    }
-
-    .profile-btn {
-      width: 30px;
-      height: 30px;
-      border-radius: 50%;
-      border: 1px solid var(--border);
-      background: var(--surface);
-      color: var(--text);
-      font-size: 12px;
-      font-weight: 700;
-      padding: 0;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .profile-menu {
-      position: absolute;
-      top: 36px;
-      right: 0;
-      width: 180px;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      background: var(--surface);
-      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
-      padding: 8px;
-      z-index: 20;
-    }
-
-    .profile-menu[hidden] {
-      display: none;
-    }
-
-    .profile-email {
-      font-size: 11px;
-      color: var(--muted);
-      padding: 2px 4px 8px;
-      border-bottom: 1px solid var(--border);
-      margin-bottom: 8px;
-      word-break: break-all;
-    }
-
-    .menu-item {
-      width: 100%;
-      text-align: left;
-      padding: 7px 8px;
-      border-radius: 8px;
-      background: transparent;
-      color: var(--text);
-      border: 1px solid transparent;
-      font-size: 12px;
-      font-weight: 600;
-    }
-
-    .menu-item:hover {
-      background: var(--border);
-    }
-
-    .menu-toggle-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      padding: 7px 8px;
-      border-radius: 8px;
-      margin-bottom: 6px;
-    }
-
-    .menu-toggle-label {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text);
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Status badge                                                         */
-    /* ------------------------------------------------------------------ */
-    .status-bar {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 8px 16px;
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-      font-size: 11px;
-      color: var(--muted);
-    }
-
-    .status-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: var(--muted);
-      flex-shrink: 0;
-    }
-
-    .status-dot.active {
-      background: var(--green);
-      box-shadow: 0 0 6px var(--green);
-    }
-
-    .status-dot.error {
-      background: var(--red);
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Stats row                                                            */
-    /* ------------------------------------------------------------------ */
-    .stats {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 1px;
-      background: var(--border);
-      border-bottom: 1px solid var(--border);
-    }
-
-    .stat {
-      background: var(--bg);
-      padding: 10px 8px;
-      text-align: center;
-    }
-
-    .stat-value {
-      font-size: 20px;
-      font-weight: 700;
-      color: var(--accent);
-    }
-
-    .stat-label {
-      font-size: 10px;
-      color: var(--muted);
-      margin-top: 2px;
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Main content sections                                                */
-    /* ------------------------------------------------------------------ */
-    .section {
-      padding: 14px 16px;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .section:last-child {
-      border-bottom: none;
-    }
-
-    .section-title {
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--muted);
-      margin-bottom: 10px;
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* API Key form                                                         */
-    /* ------------------------------------------------------------------ */
-    .input-group {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
-    label {
-      font-size: 11px;
-      color: var(--muted);
-      font-weight: 500;
-    }
-
-    .input-row {
-      display: flex;
-      gap: 6px;
-    }
-
-    input[type="password"],
-    input[type="text"],
-    input[type="url"] {
-      flex: 1;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 7px 10px;
-      color: var(--text);
-      font-size: 12px;
-      outline: none;
-      transition: border-color 0.15s;
-    }
-
-    input:focus {
-      border-color: var(--accent);
-    }
-
-    input.valid {
-      border-color: var(--green);
-    }
-
-    input.invalid {
-      border-color: var(--red);
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Buttons                                                              */
-    /* ------------------------------------------------------------------ */
-    button {
-      cursor: pointer;
-      border: none;
-      border-radius: var(--radius);
-      font-size: 12px;
-      font-weight: 600;
-      padding: 7px 14px;
-      transition: background 0.15s, opacity 0.15s;
-    }
-
-    .btn-primary {
-      background: var(--accent);
-      color: #fff;
-      white-space: nowrap;
-    }
-
-    .btn-primary:hover {
-      background: var(--accent-h);
-    }
-
-    .btn-ghost {
-      background: var(--surface);
-      color: var(--text);
-      border: 1px solid var(--border);
-    }
-
-    .btn-ghost:hover {
-      background: var(--border);
-    }
-
-    button:disabled {
-      opacity: 0.45;
-      cursor: not-allowed;
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Feedback message                                                     */
-    /* ------------------------------------------------------------------ */
-    .feedback {
-      font-size: 11px;
-      margin-top: 6px;
-      min-height: 16px;
-      transition: color 0.15s;
-    }
-
-    .feedback.ok {
-      color: var(--green);
-    }
-
-    .feedback.err {
-      color: var(--red);
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Toggle                                                               */
-    /* ------------------------------------------------------------------ */
-    .toggle-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .toggle-label {
-      font-size: 12px;
-    }
-
-    .toggle-desc {
-      font-size: 10px;
-      color: var(--muted);
-      margin-top: 1px;
-    }
-
-    .toggle {
-      position: relative;
-      width: 36px;
-      height: 20px;
-      flex-shrink: 0;
-    }
-
-    .toggle input {
-      display: none;
-    }
-
-    .toggle-track {
-      position: absolute;
-      inset: 0;
-      background: var(--border);
-      border-radius: 99px;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-
-    .toggle input:checked~.toggle-track {
-      background: var(--accent);
-    }
-
-    .toggle-thumb {
-      position: absolute;
-      top: 3px;
-      left: 3px;
-      width: 14px;
-      height: 14px;
-      background: #fff;
-      border-radius: 50%;
-      transition: transform 0.2s;
-      pointer-events: none;
-    }
-
-    .toggle input:checked~.toggle-track .toggle-thumb {
-      transform: translateX(16px);
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Footer                                                               */
-    /* ------------------------------------------------------------------ */
-    .footer {
-      padding: 8px 16px;
-      text-align: center;
-      font-size: 10px;
-      color: var(--muted);
-      border-top: 1px solid var(--border);
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Action buttons                                                       */
-    /* ------------------------------------------------------------------ */
-    .actions {
-      padding: 14px 16px;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    .btn-action {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      width: 100%;
-      padding: 10px 14px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      color: var(--text);
-      font-size: 12px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: background 0.15s, border-color 0.15s, transform 0.1s;
-    }
-
-    .btn-action:hover {
-      background: var(--border);
-      border-color: var(--accent);
-    }
-
-    .btn-action:active {
-      transform: scale(0.98);
-    }
-
-    .btn-action.success {
-      border-color: var(--green);
-      background: rgba(34, 197, 94, 0.1);
-    }
-
-    .btn-action.error {
-      border-color: var(--red);
-      background: rgba(239, 68, 68, 0.1);
-    }
-
-    .btn-action .btn-icon {
-      font-size: 16px;
-      flex-shrink: 0;
-    }
-
-    .btn-action .btn-label {
-      flex: 1;
-      text-align: left;
-    }
-
-    .btn-action .btn-status {
-      font-size: 10px;
-      color: var(--muted);
-      flex-shrink: 0;
-    }
-
-    .btn-action[hidden] {
-      display: none;
-    }
-  </style>
-</head>
-
-<body>
-
-  <!-- Header -->
-  <div class="header">
-    <div class="header-left">
-      <div class="header-icon"><img src="icons/icon48.png" width="28" height="28" style="border-radius:4px" /></div>
-      <div>
-        <div class="header-title">Dev Brain Journal</div>
-        <div class="header-sub">Developer activity tracker</div>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dev Brain Journal</title>
+    <style>
+      /* ------------------------------------------------------------------ */
+      /* Reset & base                                                         */
+      /* ------------------------------------------------------------------ */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      :root {
+        --bg: #0f1117;
+        --surface: #1a1d27;
+        --border: #2a2d3a;
+        --accent: #6c63ff;
+        --accent-h: #8b83ff;
+        --green: #22c55e;
+        --red: #ef4444;
+        --text: #e2e8f0;
+        --muted: #64748b;
+        --radius: 10px;
+      }
+
+      body {
+        width: 340px;
+        min-height: 200px;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      html,
+      body {
+        height: 100%;
+      }
+
+      /* ------------------------------------------------------------------ */
+      /* Header                                                               */
+      /* ------------------------------------------------------------------ */
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 16px 16px 12px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .header-left {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+      }
+
+      .header-icon {
+        width: 32px;
+        height: 32px;
+        background: var(--accent);
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+        flex-shrink: 0;
+      }
+
+      .header-title {
+        font-size: 15px;
+        font-weight: 600;
+      }
+
+      .header-sub {
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      .profile-wrap {
+        position: relative;
+      }
+
+      .profile-btn {
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 700;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .profile-menu {
+        position: absolute;
+        top: 36px;
+        right: 0;
+        width: 180px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--surface);
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+        padding: 8px;
+        z-index: 20;
+      }
+
+      .profile-menu[hidden] {
+        display: none;
+      }
+
+      .profile-email {
+        font-size: 11px;
+        color: var(--muted);
+        padding: 2px 4px 8px;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 8px;
+        word-break: break-all;
+      }
+
+      .menu-item {
+        width: 100%;
+        text-align: left;
+        padding: 7px 8px;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--text);
+        border: 1px solid transparent;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .menu-item:hover {
+        background: var(--border);
+      }
+
+      .menu-toggle-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 7px 8px;
+        border-radius: 8px;
+        margin-bottom: 6px;
+      }
+
+      .menu-toggle-label {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text);
+      }
+
+      /* ------------------------------------------------------------------ */
+      /* Status badge                                                         */
+      /* ------------------------------------------------------------------ */
+      .status-bar {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 16px;
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      .status-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--muted);
+        flex-shrink: 0;
+      }
+
+      .status-dot.active {
+        background: var(--green);
+        box-shadow: 0 0 6px var(--green);
+      }
+
+      .status-dot.error {
+        background: var(--red);
+      }
+
+      /* ------------------------------------------------------------------ */
+      /* Stats row                                                            */
+      /* ------------------------------------------------------------------ */
+      .stats {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 1px;
+        background: var(--border);
+        border-bottom: 1px solid var(--border);
+      }
+
+      .stat {
+        background: var(--bg);
+        padding: 10px 8px;
+        text-align: center;
+      }
+
+      .stat-value {
+        font-size: 20px;
+        font-weight: 700;
+        color: var(--accent);
+      }
+
+      .stat-label {
+        font-size: 10px;
+        color: var(--muted);
+        margin-top: 2px;
+      }
+
+      /* ------------------------------------------------------------------ */
+      /* Main content sections                                                */
+      /* ------------------------------------------------------------------ */
+      .section {
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .section:last-child {
+        border-bottom: none;
+      }
+
+      .section-title {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        margin-bottom: 10px;
+      }
+
+      /* ------------------------------------------------------------------ */
+      /* API Key form                                                         */
+      /* ------------------------------------------------------------------ */
+      .input-group {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      label {
+        font-size: 11px;
+        color: var(--muted);
+        font-weight: 500;
+      }
+
+      .input-row {
+        display: flex;
+        gap: 6px;
+      }
+
+      input[type="password"],
+      input[type="text"],
+      input[type="url"] {
+        flex: 1;
+        min-width: 0;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 7px 10px;
+        color: var(--text);
+        font-size: 12px;
+        outline: none;
+        transition: border-color 0.15s;
+      }
+
+      input:focus {
+        border-color: var(--accent);
+      }
+
+      input.valid {
+        border-color: var(--green);
+      }
+
+      input.invalid {
+        border-color: var(--red);
+      }
+
+      /* ------------------------------------------------------------------ */
+      /* Buttons                                                              */
+      /* ------------------------------------------------------------------ */
+      button {
+        cursor: pointer;
+        border: none;
+        border-radius: var(--radius);
+        font-size: 12px;
+        font-weight: 600;
+        padding: 7px 14px;
+        transition:
+          background 0.15s,
+          opacity 0.15s;
+      }
+
+      .btn-primary {
+        background: var(--accent);
+        color: #fff;
+        white-space: nowrap;
+      }
+
+      .btn-primary:hover {
+        background: var(--accent-h);
+      }
+
+      .btn-ghost {
+        background: var(--surface);
+        color: var(--text);
+        border: 1px solid var(--border);
+      }
+
+      .btn-ghost:hover {
+        background: var(--border);
+      }
+
+      button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+
+      /* ------------------------------------------------------------------ */
+      /* Feedback message                                                     */
+      /* ------------------------------------------------------------------ */
+      .feedback {
+        font-size: 11px;
+        margin-top: 6px;
+        min-height: 16px;
+        transition: color 0.15s;
+      }
+
+      .feedback.ok {
+        color: var(--green);
+      }
+
+      .feedback.err {
+        color: var(--red);
+      }
+
+      /* ------------------------------------------------------------------ */
+      /* Toggle                                                               */
+      /* ------------------------------------------------------------------ */
+      .toggle-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .toggle-label {
+        font-size: 12px;
+      }
+
+      .toggle-desc {
+        font-size: 10px;
+        color: var(--muted);
+        margin-top: 1px;
+      }
+
+      .toggle {
+        position: relative;
+        width: 36px;
+        height: 20px;
+        flex-shrink: 0;
+      }
+
+      .toggle input {
+        display: none;
+      }
+
+      .toggle-track {
+        position: absolute;
+        inset: 0;
+        background: var(--border);
+        border-radius: 99px;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+
+      .toggle input:checked ~ .toggle-track {
+        background: var(--accent);
+      }
+
+      .toggle-thumb {
+        position: absolute;
+        top: 3px;
+        left: 3px;
+        width: 14px;
+        height: 14px;
+        background: #fff;
+        border-radius: 50%;
+        transition: transform 0.2s;
+        pointer-events: none;
+      }
+
+      .toggle input:checked ~ .toggle-track .toggle-thumb {
+        transform: translateX(16px);
+      }
+
+      /* ------------------------------------------------------------------ */
+      /* Footer                                                               */
+      /* ------------------------------------------------------------------ */
+      .footer {
+        padding: 8px 16px;
+        text-align: center;
+        font-size: 10px;
+        color: var(--muted);
+        border-top: 1px solid var(--border);
+      }
+
+      /* ------------------------------------------------------------------ */
+      /* Action buttons                                                       */
+      /* ------------------------------------------------------------------ */
+      .actions {
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .btn-action {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        padding: 10px 14px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        transition:
+          background 0.15s,
+          border-color 0.15s,
+          transform 0.1s;
+      }
+
+      .btn-action:hover {
+        background: var(--border);
+        border-color: var(--accent);
+      }
+
+      .btn-action:active {
+        transform: scale(0.98);
+      }
+
+      .btn-action.success {
+        border-color: var(--green);
+        background: rgba(34, 197, 94, 0.1);
+      }
+
+      .btn-action.error {
+        border-color: var(--red);
+        background: rgba(239, 68, 68, 0.1);
+      }
+
+      .btn-action .btn-icon {
+        font-size: 16px;
+        flex-shrink: 0;
+      }
+
+      .btn-action .btn-label {
+        flex: 1;
+        text-align: left;
+      }
+
+      .btn-action .btn-status {
+        font-size: 10px;
+        color: var(--muted);
+        flex-shrink: 0;
+      }
+
+      .btn-action[hidden] {
+        display: none;
+      }
+
+      /* ------------------------------------------------------------------ */
+      /* History sync                                                         */
+      /* ------------------------------------------------------------------ */
+      .history-status-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .history-status-text {
+        font-size: 11px;
+      }
+      .history-btn-row {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      .history-hint {
+        font-size: 10px;
+        color: var(--muted);
+        margin-top: 8px;
+        line-height: 1.6;
+      }
+      .history-info {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        margin-bottom: 8px;
+      }
+      .history-info-row {
+        display: flex;
+        justify-content: space-between;
+      }
+      .history-info-lbl {
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .history-info-val {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .history-info-val.pending {
+        color: #f59e0b;
+      }
+
+      /* ------------------------------------------------------------------ */
+      /* Tab bar                                                             */
+      /* ------------------------------------------------------------------ */
+      .tab-bar {
+        display: flex;
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+      }
+      .tab {
+        flex: 1;
+        padding: 9px 0;
+        background: transparent;
+        color: var(--muted);
+        border: none;
+        border-radius: 0;
+        border-bottom: 2px solid transparent;
+        font-size: 12px;
+        font-weight: 600;
+        transition:
+          color 0.15s,
+          border-color 0.15s;
+      }
+      .tab.active {
+        color: var(--accent);
+        border-bottom-color: var(--accent);
+      }
+      .tab:hover:not(.active) {
+        color: var(--text);
+        background: transparent;
+      }
+
+      /* ------------------------------------------------------------------ */
+      /* Search panel — full-height layout when body has .search-active     */
+      /* ------------------------------------------------------------------ */
+      body.search-active {
+        height: 100%;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      body.search-active .header,
+      body.search-active .status-bar,
+      body.search-active .tab-bar {
+        flex-shrink: 0;
+      }
+
+      body.search-active #panelSearch {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      body.search-active .search-panel {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        padding-bottom: 0;
+      }
+      body.search-active .search-form,
+      body.search-active .filter-section {
+        flex-shrink: 0;
+      }
+
+      body.search-active .search-results {
+        flex: 1;
+        max-height: none;
+        min-height: 0;
+      }
+      body.search-active .search-pagination {
+        flex-shrink: 0;
+        padding-bottom: 8px;
+      }
+
+      #panelSearch {
+        width: 100%;
+      }
+
+      /* ------------------------------------------------------------------ */
+      /* Search panel — base styles                                          */
+      /* ------------------------------------------------------------------ */
+      .search-panel {
+        padding: 12px 14px;
+        height: 100%;
+        width: 100%;
+      }
+      .search-form {
+        margin-bottom: 8px;
+      }
+      .search-input-wrap {
+        display: flex;
+        gap: 6px;
+        width: 100%;
+      }
+
+      .filter-section {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        margin-bottom: 8px;
+      }
+      .filter-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+
+      .chip {
+        padding: 3px 8px;
+        border-radius: 99px;
+        font-size: 10px;
+        font-weight: 600;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        color: var(--muted);
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      .chip:hover {
+        border-color: var(--accent);
+        color: var(--text);
+      }
+      .chip.active {
+        border-color: transparent;
+        color: #fff;
+      }
+      .chip-terminal.active {
+        background: #52525b;
+      }
+      .chip-ai.active {
+        background: #7c3aed;
+      }
+      .chip-web.active {
+        background: #2563eb;
+      }
+      .chip-transcript.active {
+        background: #d97706;
+      }
+      .chip-note.active {
+        background: #059669;
+      }
+      .chip-issue.active {
+        background: #ea580c;
+      }
+      .chip-date.active {
+        background: var(--accent);
+      }
+
+      .search-results {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        max-height: 300px;
+        overflow-y: auto;
+        width: 100%;
+      }
+
+      /* ------------------------------------------------------------------ */
+      /* Result cards                                                        */
+      /* ------------------------------------------------------------------ */
+      .result-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 8px 10px;
+        transition:
+          border-color 0.15s,
+          background 0.15s;
+      }
+      /* URL cards (web / ai / transcript / note / issue) */
+      .result-card[data-url] {
+        cursor: pointer;
+      }
+      .result-card[data-url]:hover {
+        border-color: var(--accent);
+      }
+      /* Terminal copy cards */
+      .result-card[data-cmd] {
+        cursor: copy;
+      }
+      .result-card[data-cmd]:hover {
+        border-color: #52525b;
+      }
+      /* Copy feedback flash */
+      .result-card[data-copied] {
+        border-color: var(--green);
+        background: rgba(34, 197, 94, 0.07);
+      }
+      /* Title looks like a link on URL cards */
+      .result-card[data-url] .result-title {
+        color: var(--accent);
+        text-decoration: underline;
+        text-underline-offset: 2px;
+        text-decoration-color: rgba(108, 99, 255, 0.35);
+      }
+
+      .result-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 1px 6px;
+        border-radius: 99px;
+        font-size: 9px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 4px;
+        color: #fff;
+      }
+      .badge-terminal {
+        background: #52525b;
+      }
+      .badge-ai {
+        background: #7c3aed;
+      }
+      .badge-web {
+        background: #2563eb;
+      }
+      .badge-transcript {
+        background: #d97706;
+      }
+      .badge-note {
+        background: #059669;
+      }
+      .badge-issue {
+        background: #ea580c;
+      }
+
+      .result-title {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text);
+        margin-bottom: 2px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .result-title.terminal {
+        font-family: "SF Mono", "Fira Mono", monospace;
+        color: #a3e635;
+        font-size: 10.5px;
+      }
+      .result-preview {
+        font-size: 10px;
+        color: var(--muted);
+        line-height: 1.45;
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        margin-bottom: 4px;
+      }
+      .result-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 3px;
+        gap: 8px;
+      }
+      .result-footer-right {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .result-date {
+        font-size: 9px;
+        color: var(--muted);
+      }
+      .result-copy-btn {
+        border-radius: 6px;
+        padding: 2px 6px;
+        font-size: 9px;
+        font-weight: 700;
+        background: var(--border);
+        color: var(--text);
+        border: 1px solid transparent;
+      }
+      .result-copy-btn:hover {
+        border-color: #52525b;
+      }
+
+      /* Query highlight marks */
+      mark {
+        background: rgba(108, 99, 255, 0.25);
+        color: inherit;
+        border-radius: 2px;
+        padding: 0 1px;
+        font-style: normal;
+      }
+
+      /* Result count label */
+      .search-count {
+        font-size: 10px;
+        color: var(--muted);
+        margin-bottom: 4px;
+        padding: 0 2px;
+      }
+
+      .search-pagination {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-top: 8px;
+        font-size: 10px;
+        color: var(--muted);
+      }
+
+      /* ------------------------------------------------------------------ */
+      /* Empty / skeleton states                                             */
+      /* ------------------------------------------------------------------ */
+      .search-empty {
+        text-align: center;
+        padding: 32px 0;
+        font-size: 11px;
+        color: var(--muted);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+      }
+      .search-empty-icon {
+        font-size: 30px;
+        opacity: 0.35;
+      }
+
+      @keyframes shimmer {
+        0% {
+          background-position: -200% 0;
+        }
+        100% {
+          background-position: 200% 0;
+        }
+      }
+      .skeleton-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 8px 10px;
+      }
+      .skeleton-line {
+        height: 9px;
+        border-radius: 4px;
+        background: linear-gradient(
+          90deg,
+          var(--border) 25%,
+          #3a3d50 50%,
+          var(--border) 75%
+        );
+        background-size: 200% 100%;
+        animation: shimmer 1.2s infinite;
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- Header -->
+    <div class="header">
+      <div class="header-left">
+        <div class="header-icon">
+          <img
+            src="icons/icon48.png"
+            width="28"
+            height="28"
+            style="border-radius: 4px"
+          />
+        </div>
+        <div>
+          <div class="header-title">Dev Brain Journal</div>
+          <div class="header-sub">Developer activity tracker</div>
+        </div>
+      </div>
+      <div class="profile-wrap" id="profileWrap" hidden>
+        <button class="profile-btn" id="profileButton" title="Account">
+          U
+        </button>
+        <div class="profile-menu" id="profileMenu" hidden>
+          <div class="profile-email" id="profileEmail">—</div>
+          <div class="menu-toggle-row">
+            <span class="menu-toggle-label">Developer Mode</span>
+            <label class="toggle">
+              <input type="checkbox" id="toggleDeveloperMode" />
+              <div class="toggle-track">
+                <div class="toggle-thumb"></div>
+              </div>
+            </label>
+          </div>
+          <button class="menu-item" id="btnLogout">Logout</button>
+        </div>
       </div>
     </div>
-    <div class="profile-wrap" id="profileWrap" hidden>
-      <button class="profile-btn" id="profileButton" title="Account">U</button>
-      <div class="profile-menu" id="profileMenu" hidden>
-        <div class="profile-email" id="profileEmail">—</div>
-        <div class="menu-toggle-row">
-          <span class="menu-toggle-label">Developer Mode</span>
+
+    <!-- Status bar -->
+    <div class="status-bar">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">Checking status…</span>
+    </div>
+
+    <!-- Tab bar -->
+    <div class="tab-bar">
+      <button class="tab active" id="tabBtnView">📊 View</button>
+      <button class="tab" id="tabBtnSearch">🔍 Search</button>
+    </div>
+
+    <!-- View Panel -->
+    <div id="panelView">
+      <!-- Stats -->
+      <div class="stats" style="grid-template-columns: 1fr 1fr">
+        <div class="stat">
+          <div class="stat-value" id="statVisits">—</div>
+          <div class="stat-label">Visited Today</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="statAI">—</div>
+          <div class="stat-label">AI Prompts Today</div>
+        </div>
+      </div>
+
+      <!-- Weekly Graph (populated by API) -->
+      <div class="section" id="weeklyGraphSection">
+        <div class="section-title">Weekly Usage</div>
+        <div
+          id="weeklyGraphChart"
+          style="
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            height: 60px;
+            margin-top: 10px;
+            gap: 4px;
+          "
+        >
+          <!-- Bars will be injected here via JS -->
+        </div>
+        <div
+          id="weeklyGraphLabels"
+          style="
+            display: flex;
+            justify-content: space-between;
+            margin-top: 4px;
+            font-size: 9px;
+            color: var(--muted);
+          "
+        >
+          <!-- Labels will be injected here via JS -->
+        </div>
+      </div>
+
+      <!-- Top 5 Sites (populated by API) -->
+      <div class="section" id="topSitesSection">
+        <div class="section-title">Top 5 Sites (Time)</div>
+        <div
+          id="topSitesContainer"
+          style="
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 10px;
+            min-height: 100px;
+          "
+        >
+          <!-- Bars will be injected here via JS -->
+        </div>
+      </div>
+
+      <!-- Action buttons -->
+      <div class="actions">
+        <div class="section-title">Quick Actions</div>
+        <button class="btn-action" id="btnSaveTranscript">
+          <span class="btn-icon">📄</span>
+          <span class="btn-label">Save Page Transcript</span>
+          <span class="btn-status" id="statusTranscript"></span>
+        </button>
+        <button class="btn-action" id="btnSaveConversation" hidden>
+          <span class="btn-icon">🤖</span>
+          <span class="btn-label">Save AI Conversation</span>
+          <span class="btn-status" id="statusConversation"></span>
+        </button>
+      </div>
+
+      <!-- Login configuration -->
+      <div class="section" id="sectionAuth">
+        <div class="section-title">Login</div>
+
+        <div class="input-group">
+          <label for="inputEmail">Username or Email</label>
+          <input
+            type="text"
+            id="inputEmail"
+            placeholder="johndoe or user@example.com"
+            autocomplete="username"
+            spellcheck="false"
+          />
+        </div>
+
+        <div class="input-group" style="margin-top: 10px">
+          <label for="inputPassword">Password</label>
+          <div class="input-row">
+            <input
+              type="password"
+              id="inputPassword"
+              placeholder="Your password"
+              autocomplete="current-password"
+            />
+            <button class="btn-primary" id="btnLogin">Login</button>
+          </div>
+          <div class="feedback" id="feedbackAuth"></div>
+        </div>
+
+        <div class="input-group" style="margin-top: 10px">
+          <label for="inputEndpoint">Backend endpoint</label>
+          <input
+            type="url"
+            id="inputEndpoint"
+            placeholder="https://data-nexus-541643753386.asia-south1.run.app"
+          />
+        </div>
+      </div>
+
+      <!-- Tracking toggles -->
+      <div class="section">
+        <div class="section-title">Tracking Options</div>
+
+        <div class="toggle-row" style="margin-bottom: 10px">
+          <div>
+            <div class="toggle-label">Website visits</div>
+            <div class="toggle-desc">Track pages visited & time spent</div>
+          </div>
           <label class="toggle">
-            <input type="checkbox" id="toggleDeveloperMode" />
+            <input type="checkbox" id="toggleVisits" checked />
             <div class="toggle-track">
               <div class="toggle-thumb"></div>
             </div>
           </label>
         </div>
-        <button class="menu-item" id="btnLogout">Logout</button>
-      </div>
-    </div>
-  </div>
 
-  <!-- Status bar -->
-  <div class="status-bar">
-    <div class="status-dot" id="statusDot"></div>
-    <span id="statusText">Checking status…</span>
-  </div>
-
-  <!-- Stats -->
-  <div class="stats" style="grid-template-columns: 1fr 1fr;">
-    <div class="stat">
-      <div class="stat-value" id="statVisits">—</div>
-      <div class="stat-label">Visited Today</div>
-    </div>
-    <div class="stat">
-      <div class="stat-value" id="statAI">—</div>
-      <div class="stat-label">AI Prompts Today</div>
-    </div>
-  </div>
-
-  <!-- Weekly Graph (populated by API) -->
-  <div class="section" id="weeklyGraphSection">
-    <div class="section-title">Weekly Usage</div>
-    <div id="weeklyGraphChart"
-      style="display: flex; align-items: flex-end; justify-content: space-between; height: 60px; margin-top: 10px; gap: 4px;">
-      <!-- Bars will be injected here via JS -->
-    </div>
-    <div id="weeklyGraphLabels"
-      style="display: flex; justify-content: space-between; margin-top: 4px; font-size: 9px; color: var(--muted);">
-      <!-- Labels will be injected here via JS -->
-    </div>
-  </div>
-
-  <!-- Top 5 Sites (populated by API) -->
-  <div class="section" id="topSitesSection">
-    <div class="section-title">Top 5 Sites (Time)</div>
-    <div id="topSitesContainer"
-      style="display: flex; flex-direction: column; gap: 8px; margin-top: 10px; min-height: 100px;">
-      <!-- Bars will be injected here via JS -->
-    </div>
-  </div>
-
-  <!-- Action buttons -->
-  <div class="actions">
-    <div class="section-title">Quick Actions</div>
-    <button class="btn-action" id="btnSaveTranscript">
-      <span class="btn-icon">📄</span>
-      <span class="btn-label">Save Page Transcript</span>
-      <span class="btn-status" id="statusTranscript"></span>
-    </button>
-    <button class="btn-action" id="btnSaveConversation" hidden>
-      <span class="btn-icon">🤖</span>
-      <span class="btn-label">Save AI Conversation</span>
-      <span class="btn-status" id="statusConversation"></span>
-    </button>
-  </div>
-
-  <!-- Login configuration -->
-  <div class="section" id="sectionAuth">
-    <div class="section-title">Login</div>
-
-    <div class="input-group">
-      <label for="inputEmail">Username or Email</label>
-      <input type="text" id="inputEmail" placeholder="johndoe or user@example.com" autocomplete="username" spellcheck="false" />
-    </div>
-
-    <div class="input-group" style="margin-top: 10px;">
-      <label for="inputPassword">Password</label>
-      <div class="input-row">
-        <input type="password" id="inputPassword" placeholder="Your password" autocomplete="current-password" />
-        <button class="btn-primary" id="btnLogin">Login</button>
-      </div>
-      <div class="feedback" id="feedbackAuth"></div>
-    </div>
-
-    <div class="input-group" style="margin-top: 10px;">
-      <label for="inputEndpoint">Backend endpoint</label>
-      <input type="url" id="inputEndpoint" placeholder="https://data-nexus-541643753386.asia-south1.run.app" />
-    </div>
-  </div>
-
-  <!-- Tracking toggles -->
-  <div class="section">
-    <div class="section-title">Tracking Options</div>
-
-    <div class="toggle-row" style="margin-bottom: 10px;">
-      <div>
-        <div class="toggle-label">Website visits</div>
-        <div class="toggle-desc">Track pages visited & time spent</div>
-      </div>
-      <label class="toggle">
-        <input type="checkbox" id="toggleVisits" checked />
-        <div class="toggle-track">
-          <div class="toggle-thumb"></div>
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-label">Search queries</div>
+            <div class="toggle-desc">Capture searches on dev sites</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="toggleSearches" checked />
+            <div class="toggle-track">
+              <div class="toggle-thumb"></div>
+            </div>
+          </label>
         </div>
-      </label>
-    </div>
-
-    <div class="toggle-row">
-      <div>
-        <div class="toggle-label">Search queries</div>
-        <div class="toggle-desc">Capture searches on dev sites</div>
       </div>
-      <label class="toggle">
-        <input type="checkbox" id="toggleSearches" checked />
-        <div class="toggle-track">
-          <div class="toggle-thumb"></div>
+
+      <!-- Shell History Sync -->
+      <div class="section" id="sectionHistory">
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-label">Shell History Sync</div>
+            <div class="toggle-desc">Sync terminal commands automatically</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="toggleHistorySync" />
+            <div class="toggle-track"><div class="toggle-thumb"></div></div>
+          </label>
         </div>
-      </label>
+        <div id="historySyncBody" style="display: none; margin-top: 10px">
+          <div class="history-status-row">
+            <div class="status-dot" id="historyStatusDot"></div>
+            <span class="history-status-text" id="historyStatusText"
+              >No file selected</span
+            >
+          </div>
+          <div class="history-info" id="historyStatsRow" style="display: none">
+            <div class="history-info-row">
+              <span class="history-info-lbl">All commands</span>
+              <span class="history-info-val" id="historyStatTotal">—</span>
+            </div>
+            <div class="history-info-row">
+              <span class="history-info-lbl">Synced</span>
+              <span class="history-info-val" id="historyStatSynced">—</span>
+            </div>
+            <div class="history-info-row">
+              <span class="history-info-lbl">Not synced</span>
+              <span class="history-info-val pending" id="historyStatPending"
+                >—</span
+              >
+            </div>
+            <div class="history-info-row">
+              <span class="history-info-lbl">Last sync</span>
+              <span class="history-info-val" id="historyStatLastSync">—</span>
+            </div>
+          </div>
+          <div class="history-btn-row">
+            <button
+              class="btn-ghost"
+              id="btnPickHistory"
+              style="flex: 1; font-size: 11px"
+            >
+              📂 Pick History File
+            </button>
+            <button
+              class="btn-ghost"
+              id="btnHistorySyncNow"
+              style="flex: 1; font-size: 11px"
+              disabled
+            >
+              ↑ Sync Now
+            </button>
+          </div>
+          <div class="history-hint">
+            Select <code>.zsh_history</code> or <code>.bash_history</code> once
+            — syncs automatically.<br />
+            To show hidden files: <strong>Mac</strong> Cmd+Shift+. ·
+            <strong>Win</strong> View→Hidden items ·
+            <strong>Linux</strong> Ctrl+H
+          </div>
+          <div class="feedback" id="feedbackHistory"></div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="footer">
+        Dev Brain v1.0 · Events are sent to your configured backend only
+      </div>
     </div>
-  </div>
+    <!-- end panelView -->
 
+    <!-- Search Panel -->
+    <div id="panelSearch" hidden>
+      <div class="search-panel">
+        <form id="searchForm" class="search-form">
+          <div class="search-input-wrap">
+            <input
+              type="text"
+              id="searchInput"
+              placeholder="Search commands, pages, AI…"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button type="submit" class="btn-primary">Go</button>
+          </div>
+        </form>
+        <div class="filter-section">
+          <div class="filter-chips" id="filterTypes">
+            <button
+              type="button"
+              class="chip chip-terminal"
+              data-type="terminal"
+            >
+              Terminal
+            </button>
+            <button type="button" class="chip chip-ai" data-type="ai">
+              AI
+            </button>
+            <button type="button" class="chip chip-web" data-type="web">
+              Web
+            </button>
+            <button
+              type="button"
+              class="chip chip-transcript"
+              data-type="transcript"
+            >
+              Transcript
+            </button>
+            <button type="button" class="chip chip-note" data-type="note">
+              Note
+            </button>
+            <button type="button" class="chip chip-issue" data-type="issue">
+              Issue
+            </button>
+          </div>
+          <div class="filter-chips" id="filterDates">
+            <button type="button" class="chip chip-date active" data-date="">
+              Any time
+            </button>
+            <button type="button" class="chip chip-date" data-date="today">
+              Today
+            </button>
+            <button type="button" class="chip chip-date" data-date="7d">
+              7 days
+            </button>
+            <button type="button" class="chip chip-date" data-date="30d">
+              30 days
+            </button>
+          </div>
+        </div>
+        <div class="search-results" id="searchResults">
+          <div class="search-empty">
+            <div class="search-empty-icon">🔍</div>
+            Search commands, pages, and AI activity
+          </div>
+        </div>
+        <div class="search-pagination" id="searchPagination" hidden></div>
+      </div>
+    </div>
 
-  <!-- Footer -->
-  <div class="footer">
-    Dev Brain v1.0 · Events are sent to your configured backend only
-  </div>
-
-  <script src="popup.js"></script>
-</body>
-
+    <script src="popup.js"></script>
+  </body>
 </html>
